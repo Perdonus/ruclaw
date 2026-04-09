@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=RuClaw Launcher
+Comment=Веб-интерфейс настройки и управления RuClaw
+Exec=ruclaw-launcher
+Icon=ruclaw-launcher
+Terminal=true
+Type=Application
+Categories=Utility;Network;
+Keywords=ruclaw;ai;agent;bot;

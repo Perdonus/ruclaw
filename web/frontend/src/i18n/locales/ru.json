@@ -1,0 +1,661 @@
+{
+  "navigation": {
+    "chat": "Чат",
+    "model_group": "Модели",
+    "models": "Модели",
+    "credentials": "Учётные данные",
+    "agent_group": "Агент",
+    "hub": "Хаб",
+    "skills": "Навыки",
+    "tools": "Инструменты",
+    "services": "Сервисы",
+    "channels_group": "Каналы",
+    "show_more_channels": "Ещё",
+    "show_less_channels": "Меньше",
+    "config": "Конфиг",
+    "logs": "Логи"
+  },
+  "launcherLogin": {
+    "title": "Вход",
+    "description": "Введите пароль панели управления, чтобы продолжить.",
+    "passwordLabel": "Пароль",
+    "passwordPlaceholder": "Введите пароль",
+    "submit": "Войти",
+    "errorInvalid": "Неверный пароль. Попробуйте ещё раз.",
+    "errorNetwork": "Сетевая ошибка. Попробуйте ещё раз."
+  },
+  "launcherSetup": {
+    "title": "Задайте пароль панели управления",
+    "description": "Выберите пароль, чтобы защитить доступ к этой панели управления. Он потребуется при каждом входе.",
+    "passwordLabel": "Пароль",
+    "passwordPlaceholder": "Минимум 8 символов",
+    "confirmLabel": "Подтвердите пароль",
+    "confirmPlaceholder": "Повторите пароль",
+    "submit": "Установить пароль",
+    "errorMismatch": "Пароли не совпадают.",
+    "errorNetwork": "Сетевая ошибка. Попробуйте ещё раз."
+  },
+  "chat": {
+    "welcome": "Чем помочь сегодня?",
+    "welcomeDesc": "Спросите меня о погоде, настройках или любой другой задаче. Я готов помочь.",
+    "placeholder": "Начните новое сообщение...\nНажмите Enter, чтобы отправить, Shift + Enter для новой строки",
+    "newChat": "Новый чат",
+    "notConnected": "Шлюз не запущен. Запустите его, чтобы начать чат.",
+    "thinking": {
+      "step1": "Думаю...",
+      "step2": "Анализирую ваш запрос...",
+      "step3": "Готовлю ответ...",
+      "step4": "Почти готово..."
+    },
+    "history": "История",
+    "noHistory": "История чатов пока пуста",
+    "historyLoadFailed": "Не удалось загрузить историю чатов",
+    "historyOpenFailed": "Не удалось открыть эту историю чата",
+    "loadingMore": "Загрузка...",
+    "deleteSession": "Удалить сессию",
+    "messagesCount": "{{count}} сообщений",
+    "noModel": "Выберите модель",
+    "attachImage": "Добавить изображения",
+    "removeImage": "Удалить изображение",
+    "uploadedImage": "Изображение загружено",
+    "invalidImage": "\"{{name}}\" не является поддерживаемым файлом изображения.",
+    "imageTooLarge": "\"{{name}}\" превышает лимит {{size}}.",
+    "imageReadFailed": "Не удалось прочитать \"{{name}}\".",
+    "empty": {
+      "noConfiguredModel": "Модели не настроены",
+      "noConfiguredModelDescription": "Перед началом чата нужно настроить хотя бы одну AI-модель с API-ключом.",
+      "goToModels": "Перейти к моделям",
+      "noSelectedModel": "Модель не выбрана",
+      "noSelectedModelDescription": "Модели уже настроены, но модель по умолчанию не выбрана. Выберите модель перед началом чата.",
+      "notRunning": "Шлюз не запущен",
+      "notRunningDescription": "Запустите сервис шлюза, чтобы начать чат. Используйте кнопку запуска шлюза в верхней панели."
+    },
+    "modelGroup": {
+      "apikey": "API Key",
+      "oauth": "OAuth",
+      "local": "Локальная"
+    }
+  },
+  "header": {
+    "logout": {
+      "tooltip": "Выйти",
+      "confirm": "Выйти",
+      "description": "Вы действительно хотите выйти из панели управления?"
+    },
+    "gateway": {
+      "stopDialog": {
+        "title": "Остановить шлюз?",
+        "description": "Вы действительно хотите остановить шлюз? Это разорвёт активные чат-сессии и остановит инференс.",
+        "confirm": "Остановить шлюз"
+      },
+      "action": {
+        "start": "Запустить шлюз",
+        "stop": "Остановить шлюз",
+        "restart": "Перезапустить шлюз"
+      },
+      "status": {
+        "starting": "Запуск шлюза...",
+        "restarting": "Перезапуск шлюза...",
+        "stopping": "Остановка шлюза..."
+      },
+      "restartRequired": "Чтобы изменения конфигурации вступили в силу, нужно перезапустить шлюз."
+    }
+  },
+  "common": {
+    "language": "Язык",
+    "cancel": "Отмена",
+    "save": "Сохранить",
+    "saving": "Сохранение...",
+    "lightMode": "Светлая тема",
+    "darkMode": "Тёмная тема",
+    "reset": "Сбросить",
+    "confirm": "Подтвердить"
+  },
+  "labels": {
+    "loading": "Загрузка..."
+  },
+  "footer": {
+    "version": "Версия",
+    "commit": "Коммит",
+    "build": "Сборка",
+    "version_unknown": "Неизвестно"
+  },
+  "credentials": {
+    "description": "Управляйте OAuth- и токен-учётными данными для поддерживаемых провайдеров.",
+    "loading": "Загрузка учётных данных...",
+    "providers": {
+      "openai": {
+        "description": "Поддерживаются вход через OAuth в браузере, device code и токен."
+      },
+      "anthropic": {
+        "description": "Для доступа к Claude используется вход по токену."
+      },
+      "antigravity": {
+        "description": "Для Google Cloud Code Assist используется OAuth через браузер."
+      }
+    },
+    "status": {
+      "connected": "Подключено",
+      "needsRefresh": "Нужно обновить",
+      "expired": "Истекло",
+      "notLoggedIn": "Не выполнен вход"
+    },
+    "actions": {
+      "browser": "OAuth в браузере",
+      "deviceCode": "Device Code",
+      "stopLoading": "Остановить загрузку",
+      "saveToken": "Сохранить",
+      "logout": "Выйти"
+    },
+    "logoutDialog": {
+      "title": "Выйти из провайдера?",
+      "description": "Это удалит сохранённые учётные данные для {{provider}}."
+    },
+    "fields": {
+      "openaiToken": "Токен OpenAI",
+      "anthropicToken": "Токен Anthropic"
+    },
+    "labels": {
+      "account": "Аккаунт",
+      "email": "Email",
+      "project": "Проект"
+    },
+    "errors": {
+      "loadFailed": "Не удалось загрузить учётные данные",
+      "flowFailed": "Не удалось проверить поток аутентификации",
+      "loginFailed": "Не удалось войти",
+      "logoutFailed": "Не удалось выйти",
+      "invalidBrowserResponse": "Некорректный ответ браузерной авторизации",
+      "invalidDeviceResponse": "Некорректный ответ device code",
+      "popupBlocked": "Не удалось открыть новую вкладку. Разрешите всплывающие окна и попробуйте ещё раз."
+    },
+    "flow": {
+      "current": "Текущий статус аутентификации",
+      "pending": "Ожидание авторизации...",
+      "success": "Аутентификация выполнена",
+      "error": "Ошибка аутентификации",
+      "expired": "Сессия аутентификации истекла"
+    },
+    "device": {
+      "title": "Вход OpenAI по device code",
+      "description": "Откройте страницу подтверждения и введите код ниже. Эта страница будет обновляться автоматически.",
+      "code": "Код пользователя",
+      "url": "URL подтверждения",
+      "polling": "Проверяю статус входа...",
+      "open": "Открыть страницу подтверждения"
+    }
+  },
+  "models": {
+    "description": "Настройте API-ключи для AI-провайдеров. В чате доступны только настроенные модели.",
+    "loadError": "Не удалось загрузить модели",
+    "noDefaultHintPrefix": "Модель по умолчанию ещё не выбрана. Нажмите",
+    "noDefaultHintSuffix": ", чтобы сделать её основной.",
+    "status": {
+      "available": "Доступна",
+      "unconfigured": "Не настроена",
+      "unreachable": "Сервис недоступен"
+    },
+    "badge": {
+      "default": "По умолчанию",
+      "virtual": "Виртуальная"
+    },
+    "action": {
+      "edit": "Изменить API-ключ",
+      "setDefault": "Сделать моделью по умолчанию",
+      "delete": "Удалить модель"
+    },
+    "defaultOnSave": {
+      "label": "Модель по умолчанию",
+      "description": "Автоматически сделать эту модель основной после сохранения."
+    },
+    "add": {
+      "button": "Добавить модель",
+      "title": "Добавить пользовательскую модель",
+      "description": "Добавьте endpoint модели, совместимой с OpenAI, или нативной модели.",
+      "modelName": "Псевдоним модели",
+      "modelNamePlaceholder": "например, my-gpt4",
+      "modelNameHint": "Короткое имя, по которому эта модель будет различаться в диалогах.",
+      "modelId": "Идентификатор модели",
+      "modelIdPlaceholder": "например, openai/gpt-4o",
+      "modelIdHint": "Формат: protocol/model-id. Поддерживаются: openai, anthropic, gemini, groq и др.",
+      "errorRequired": "Это поле обязательно.",
+      "errorDuplicateModelName": "Такой псевдоним уже существует. Используйте другое имя.",
+      "saveError": "Не удалось добавить модель",
+      "confirm": "Добавить модель"
+    },
+    "delete": {
+      "title": "Удалить модель?",
+      "description": "\"{{name}}\" будет навсегда удалена из списка моделей. Это действие нельзя отменить.",
+      "confirm": "Удалить"
+    },
+    "advanced": {
+      "toggle": "Дополнительные параметры"
+    },
+    "field": {
+      "apiBase": "API Base URL",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "Введите API-ключ",
+      "apiKeyPlaceholderSet": "Оставьте пустым, чтобы сохранить текущий ключ",
+      "proxy": "HTTP-прокси",
+      "proxyHint": "Необязательно. Например: http://127.0.0.1:7890",
+      "authMethod": "Способ аутентификации",
+      "authMethodHint": "Способ аутентификации: oauth, token. Оставьте пустым для аутентификации по API-ключу.",
+      "connectMode": "Режим подключения",
+      "connectModeHint": "Режим подключения для CLI-провайдеров: stdio или grpc.",
+      "workspace": "Путь к workspace",
+      "workspaceHint": "Рабочая директория для CLI-провайдеров (например, GitHub Copilot).",
+      "requestTimeout": "Таймаут запроса (с)",
+      "requestTimeoutHint": "Максимальное время ожидания ответа в секундах. 0 = использовать значение по умолчанию.",
+      "rpm": "Лимит запросов (RPM)",
+      "rpmHint": "Максимум запросов в минуту. 0 = без ограничений.",
+      "thinkingLevel": "Уровень размышления",
+      "thinkingLevelHint": "Бюджет расширенного размышления: off, low, medium, high, xhigh, adaptive.",
+      "maxTokensField": "Поле max tokens",
+      "maxTokensFieldHint": "Переопределяет имя поля запроса для max tokens, например max_completion_tokens.",
+      "extraBody": "Дополнительное тело запроса",
+      "extraBodyHint": "Дополнительные JSON-поля, которые будут добавлены в тело запроса, например {\"reasoning_split\": true}.",
+      "customHeaders": "Пользовательские заголовки",
+      "customHeadersHint": "Дополнительные HTTP-заголовки, которые будут добавляться в каждый запрос, например {\"X-Source\": \"coding-plan\"}."
+    },
+    "edit": {
+      "title": "Настроить {{name}}",
+      "apiKeyHint": "Ключ уже задан. Оставьте поле пустым, чтобы не менять его.",
+      "oauthNote": "Этот провайдер использует OAuth — API-ключ не требуется.",
+      "saveError": "Не удалось сохранить"
+    }
+  },
+  "channels": {
+    "loadError": "Не удалось загрузить каналы",
+    "name": {
+      "telegram": "Telegram",
+      "discord": "Discord",
+      "slack": "Slack",
+      "feishu": "Feishu",
+      "dingtalk": "DingTalk",
+      "line": "LINE",
+      "qq": "QQ",
+      "onebot": "OneBot",
+      "wecom": "WeCom",
+      "whatsapp": "WhatsApp",
+      "whatsapp_native": "WhatsApp Native",
+      "pico": "Веб",
+      "maixcam": "MaixCam",
+      "matrix": "Matrix",
+      "irc": "IRC",
+      "weixin": "WeChat"
+    },
+    "weixin": {
+      "bindTitle": "Привязка аккаунта WeChat",
+      "bindDesc": "Отсканируйте QR-код в WeChat, чтобы привязать личный аккаунт.",
+      "bind": "Привязать WeChat",
+      "rebind": "Перепривязать",
+      "bound": "WeChat привязан",
+      "notBound": "Аккаунт WeChat пока не привязан.",
+      "generating": "Генерация QR-кода...",
+      "scanHint": "Откройте WeChat и отсканируйте QR-код",
+      "scanned": "Код отсканирован — подтвердите в WeChat",
+      "expired": "Срок действия QR-кода истёк",
+      "retry": "Повторить",
+      "refresh": "Обновить QR",
+      "errorGeneric": "Произошла ошибка. Попробуйте ещё раз."
+    },
+    "wecom": {
+      "bindTitle": "Привязка WeCom",
+      "bindDesc": "Отсканируйте QR-код в WeCom, чтобы привязать вашего AI-бота.",
+      "bind": "Привязать WeCom",
+      "rebind": "Перепривязать",
+      "bound": "WeCom привязан",
+      "notBound": "AI-бот WeCom пока не привязан.",
+      "generating": "Генерация QR-кода...",
+      "scanHint": "Откройте WeCom и отсканируйте QR-код",
+      "scanned": "Код отсканирован, подтвердите в WeCom",
+      "expired": "Срок действия QR-кода истёк",
+      "retry": "Повторить",
+      "refresh": "Обновить QR",
+      "errorGeneric": "Произошла ошибка. Попробуйте ещё раз."
+    },
+    "field": {
+      "token": "Токен бота",
+      "tokenPlaceholder": "Введите токен бота",
+      "botToken": "Токен бота",
+      "appToken": "App Token",
+      "appId": "App ID",
+      "appSecret": "App Secret",
+      "verificationToken": "Токен проверки",
+      "encryptKey": "Ключ шифрования",
+      "baseUrl": "API Base URL",
+      "proxy": "HTTP-прокси",
+      "mentionOnly": "Только по упоминанию",
+      "typingEnabled": "Индикатор набора",
+      "placeholderEnabled": "Сообщение-заглушка",
+      "placeholderText": "Текст заглушки",
+      "groupTriggerMentionOnly": "В группе только по упоминанию",
+      "groupTriggerPrefixes": "Префиксы триггера в группе",
+      "isLark": "Lark (международный)",
+      "allowFrom": "Разрешить для",
+      "allowFromPlaceholder": "например, 123456, 789012",
+      "allowOrigins": "Разрешённые origin-домены",
+      "allowOriginsPlaceholder": "например, https://example.com, http://localhost:5173",
+      "secretPlaceholder": "Введите секрет",
+      "secretHintSet": "Значение уже задано. Оставьте поле пустым, чтобы не менять его."
+    },
+    "page": {
+      "notFound": "Канал \"{{name}}\" не поддерживается.",
+      "saveSuccess": "Конфигурация канала сохранена.",
+      "saveError": "Не удалось сохранить конфигурацию канала",
+      "docLink": "Документация",
+      "enableLabel": "Включить канал",
+      "restartRequiredTitle": "Требуется перезапуск шлюза",
+      "restartRequiredDesc": "Последняя конфигурация {{name}} сохранена. Перезапустите шлюз, чтобы изменения вступили в силу."
+    },
+    "form": {
+      "desc": {
+        "token": "Токен доступа бота для подключения к API платформы.",
+        "botToken": "Токен бота для отправки и получения сообщений.",
+        "appToken": "Токен приложения для подключений через Socket Mode.",
+        "appId": "Уникальный ID приложения для аутентификации.",
+        "appSecret": "Секрет приложения для подписи и аутентификации.",
+        "verificationToken": "Токен проверки для callback-событий.",
+        "encryptKey": "Ключ шифрования для расшифровки callback-полезной нагрузки.",
+        "baseUrl": "Базовый URL API платформы. По умолчанию используется официальный endpoint.",
+        "proxy": "Адрес HTTP-прокси для исходящего сетевого доступа.",
+        "mentionOnly": "Отвечать в групповых чатах только когда бот явно упомянут.",
+        "typingEnabled": "Показывать статус набора текста, пока ассистент генерирует ответ.",
+        "placeholderEnabled": "Включить временные сообщения-заглушки до отправки финального ответа.",
+        "groupTriggerMentionOnly": "В групповых чатах отвечать только при упоминании бота.",
+        "groupTriggerPrefixes": "Пользовательские префиксы-триггеры для группового чата, через запятую.",
+        "isLark": "Использовать международный домен Lark (open.larksuite.com) вместо домена Feishu (open.feishu.cn).",
+        "allowFrom": "Разрешённые ID пользователей или групп, через запятую.",
+        "allowOrigins": "Разрешённые origin-домены, через запятую.",
+        "wsUrl": "URL WebSocket-сервиса.",
+        "reconnectInterval": "Интервал переподключения после разрыва соединения (секунды).",
+        "bridgeUrl": "URL bridge-сервиса.",
+        "sessionStorePath": "Локальный путь для хранения сессий.",
+        "useNative": "Использовать ли режим нативного клиента.",
+        "host": "Адрес хоста сервиса.",
+        "port": "Порт сервиса.",
+        "homeserver": "URL homeserver Matrix.",
+        "userId": "ID пользователя аккаунта.",
+        "deviceId": "ID устройства.",
+        "joinOnInvite": "Автоматически входить в комнаты по приглашению.",
+        "clientId": "Client ID для аутентификации на платформе.",
+        "corpId": "Corp ID организации.",
+        "agentId": "Agent ID корпоративного приложения.",
+        "webhookUrl": "Полный URL webhook.",
+        "webhookHost": "Хост для прослушивания webhook.",
+        "webhookPort": "Порт для webhook.",
+        "webhookPath": "Путь маршрута webhook.",
+        "replyTimeout": "Таймаут ответа в секундах.",
+        "maxSteps": "Максимальное число шагов обработки.",
+        "welcomeMessage": "Текст приветственного сообщения для новых сессий.",
+        "allowTokenQuery": "Разрешить токен в query-параметрах URL.",
+        "pingInterval": "Интервал heartbeat соединения в секундах.",
+        "readTimeout": "Таймаут чтения в секундах.",
+        "writeTimeout": "Таймаут записи в секундах.",
+        "maxConnections": "Максимальное число одновременных подключений.",
+        "server": "Адрес IRC-сервера.",
+        "tls": "Нужно ли включать TLS.",
+        "nick": "Ник бота.",
+        "user": "Имя пользователя IRC.",
+        "realName": "Отображаемое реальное имя.",
+        "channels": "IRC-каналы для подключения.",
+        "requestCaps": "Список IRC-capabilities, запрашиваемых при подключении.",
+        "maxBase64FileSizeMiB": "Максимальный размер в MiB для конвертации локальных файлов в base64 перед загрузкой. 0 означает без ограничений. Применяется только к локальным файлам, не к URL-загрузкам.",
+        "genericField": "Используется для настройки поля {{field}}."
+      }
+    },
+    "validation": {
+      "requiredField": "Это поле обязательно."
+    }
+  },
+  "pages": {
+    "agent": {
+      "load_error": "Не удалось загрузить информацию о поддержке агента.",
+      "skills": {
+        "empty": "Доступных навыков сейчас нет.",
+        "install_success": "{{name}} установлен.",
+        "install_error": "Не удалось установить навык.",
+        "search_placeholder": "Поиск по имени, описанию или реестру",
+        "source_label": "Тип",
+        "sort_label": "Сортировка",
+        "import": "Импортировать навык",
+        "import_success": "Навык импортирован.",
+        "import_error": "Не удалось импортировать навык.",
+        "import_invalid_type": "Поддерживаются только Markdown- или ZIP-файлы навыков.",
+        "import_invalid_size": "Файл навыка должен быть не больше 1 МБ.",
+        "import_constraints": "Импортируйте Markdown- или ZIP-файл навыка размером до 1 МБ",
+        "view": "Просмотр",
+        "delete": "Удалить",
+        "delete_title": "Удалить навык?",
+        "delete_description": "\"{{name}}\" будет удалён из навыков workspace.",
+        "delete_confirm": "Удалить",
+        "delete_success": "Навык удалён.",
+        "delete_error": "Не удалось удалить навык.",
+        "viewer_title": "Содержимое навыка",
+        "viewer_description": "Здесь можно прочитать текущее эффективное содержимое SKILL.md.",
+        "load_detail_error": "Не удалось загрузить содержимое навыка.",
+        "no_description": "Описание отсутствует.",
+        "no_results": "Ни один навык не подошёл под текущие фильтры.",
+        "dropzone_title": "Импорт в workspace",
+        "dropzone_description": "Перетащите сюда файл навыка или выберите его на диске.",
+        "dropzone_label": "Перетащите сюда файл навыка",
+        "dropzone_active": "Отпустите, чтобы импортировать этот навык",
+        "dropzone_release": "Навык будет нормализован и сохранён в директорию навыков workspace.",
+        "marketplace_title": "Найти навыки",
+        "marketplace_description": "Ищите по реестрам навыков и устанавливайте полезные навыки в текущий workspace",
+        "marketplace_search_placeholder": "Ищите возможности вроде github, docker, database...",
+        "marketplace_search_action": "Найти",
+        "marketplace_search_status": "Статус поиска",
+        "marketplace_install_status": "Статус установки",
+        "marketplace_notice_title": "Предупреждение о безопасности",
+        "marketplace_notice_body": "Навыки из реестров являются сторонним контентом. Перед установкой проверьте автора, URL страницы, инструкции и необходимость кода или учётных данных.",
+        "marketplace_status_disabled": "Отключено. Сначала включите соответствующий инструмент на странице «Инструменты».",
+        "marketplace_status_enable_hint": "Сначала включите связанный инструмент на странице «Инструменты».",
+        "marketplace_search_error": "Не удалось выполнить поиск по реестрам.",
+        "marketplace_loading_results": "Ищу навыки...",
+        "marketplace_loading_more": "Загружаю ещё навыки...",
+        "marketplace_results_title": "{{count}} результатов по запросу “{{query}}”",
+        "marketplace_results_hint": "Результаты из реестров устанавливаются в текущий workspace.",
+        "marketplace_install_action": "Установить",
+        "marketplace_installed": "Установлено",
+        "marketplace_view_installed": "Открыть локальный",
+        "marketplace_installed_hint": "Уже доступно в этом workspace как “{{name}}”.",
+        "marketplace_empty_results": "Нет устанавливаемых навыков по запросу “{{query}}”.",
+        "marketplace_idle": "Найдите нужную возможность, чтобы увидеть доступные для установки навыки из настроенных реестров.",
+        "marketplace_unavailable": "Поиск по реестрам сейчас недоступен. Проверьте конфигурацию инструментов Skills.",
+        "sort": {
+          "name_asc": "Имя (А-Я)",
+          "name_desc": "Имя (Я-А)",
+          "source": "Тип"
+        },
+        "origin": {
+          "all": "Все типы",
+          "builtin": "Встроенные",
+          "third_party": "Сторонние",
+          "manual": "Ручные"
+        },
+        "summary": {
+          "total": "Всего навыков"
+        },
+        "detail_tabs": {
+          "preview": "Предпросмотр",
+          "raw": "Raw",
+          "meta": "Метаданные"
+        },
+        "metadata": {
+          "name": "Имя",
+          "description": "Описание",
+          "registry": "Реестр",
+          "url": "URL",
+          "version": "Установленная версия",
+          "lines": "Количество строк",
+          "characters": "Количество символов"
+        }
+      },
+      "tools": {
+        "search_placeholder": "Поиск инструментов...",
+        "no_results": "Нет инструментов, соответствующих вашим критериям.",
+        "filter": {
+          "all": "Все статусы",
+          "enabled": "Только включённые",
+          "disabled": "Только выключенные",
+          "blocked": "Только заблокированные"
+        },
+        "empty": "Инструменты недоступны.",
+        "enable_success": "Инструмент включён.",
+        "disable_success": "Инструмент выключен.",
+        "toggle_error": "Не удалось обновить состояние инструмента.",
+        "status": {
+          "enabled": "Включён",
+          "disabled": "Выключен",
+          "blocked": "Заблокирован"
+        },
+        "categories": {
+          "automation": "Автоматизация",
+          "filesystem": "Файловая система",
+          "web": "Веб",
+          "communication": "Связь",
+          "skills": "Навыки",
+          "agents": "Агенты",
+          "hardware": "Оборудование",
+          "discovery": "Обнаружение"
+        },
+        "reasons": {
+          "requires_linux": "Этот инструмент работает только на Linux-хостах, где доступны нужные device-файлы.",
+          "requires_skills": "Включите `tools.skills`, прежде чем этот инструмент реестра навыков можно будет использовать.",
+          "requires_subagent": "Включите `tools.subagent`, чтобы инструмент spawn мог делегировать работу.",
+          "requires_mcp_discovery": "Включите `tools.mcp.discovery`, прежде чем станут доступны инструменты MCP discovery."
+        }
+      }
+    },
+    "config": {
+      "load_error": "Не удалось загрузить конфигурацию. Обновите страницу и попробуйте ещё раз.",
+      "workspace": "Директория workspace",
+      "workspace_hint": "Базовая директория для файловых операций агента.",
+      "restrict_workspace": "Ограничить workspace",
+      "restrict_workspace_hint": "Разрешать файловые операции только внутри workspace.",
+      "split_on_marker": "Разговорный режим",
+      "split_on_marker_hint": "Разбивать длинные сообщения на короткие, как в обычном человеческом чате.",
+      "tool_feedback_enabled": "Предпросмотр вызовов инструментов",
+      "tool_feedback_enabled_hint": "Перед каждым выполнением инструмента отправлять в текущий чат короткий предпросмотр вызова.",
+      "tool_feedback_max_args_length": "Длина предпросмотра аргументов инструмента",
+      "tool_feedback_max_args_length_hint": "Максимальное число символов аргументов, показываемых в каждом сообщении предпросмотра вызова инструмента. Установите 0, чтобы использовать значение по умолчанию.",
+      "exec_enabled": "Разрешить команды",
+      "exec_enabled_hint": "Включить или выключить выполнение команд в приложении. Когда выключено, никакие запросы на команды не будут запускаться.",
+      "allow_remote": "Разрешить удалённые команды",
+      "allow_remote_hint": "Когда включено, команды могут выполняться и в удалённых сессиях или нелокальных контекстах. Когда выключено, выполнение команд остаётся доступным только в локальных безопасных контекстах.",
+      "enable_deny_patterns": "Включить чёрный список",
+      "enable_deny_patterns_hint": "Когда включено, приложение блокирует команды, совпадающие с его встроенными опасными шаблонами и пользовательским чёрным списком ниже.",
+      "exec_timeout_seconds": "Таймаут команды (секунды)",
+      "exec_timeout_seconds_hint": "Максимальное время выполнения команды. Установите 0, чтобы использовать таймаут по умолчанию.",
+      "custom_deny_patterns": "Чёрный список команд",
+      "custom_deny_patterns_hint": "Добавьте дополнительные правила блокировки команд, по одному регулярному выражению на строку. Команда, совпавшая с любым правилом, будет заблокирована.",
+      "custom_allow_patterns": "Белый список команд",
+      "custom_allow_patterns_hint": "Добавьте дополнительные правила разрешения команд, по одному регулярному выражению на строку. Команда, совпавшая с любым правилом здесь, пропускает проверку по чёрному списку, но остальные ограничения безопасности всё равно действуют.",
+      "custom_patterns_placeholder": "^rm\\s+-rf\\b\n^git\\s+push\\b",
+      "pattern_detector_title": "Инструмент проверки шаблонов",
+      "pattern_detector_hint": "Введите команду, чтобы проверить, совпадает ли она с шаблонами чёрного или белого списка.",
+      "pattern_detector_input_placeholder": "Введите команду для проверки, например rm -rf /tmp",
+      "pattern_detector_test_button": "Проверить",
+      "pattern_detector_result_allowed": "Разрешено (совпадение с белым списком)",
+      "pattern_detector_result_blocked": "Заблокировано (совпадение с чёрным списком)",
+      "pattern_detector_result_no_match": "Совпадений нет (будут использованы правила по умолчанию)",
+      "allow_shell_execution": "Разрешить команды по расписанию",
+      "allow_shell_execution_hint": "Разрешать задачам по расписанию выполнять команды по умолчанию. Когда выключено, пользователи должны передавать command_confirm=true, чтобы запланировать задачу с командой.",
+      "cron_exec_timeout": "Таймаут команды по расписанию (минуты)",
+      "cron_exec_timeout_hint": "Максимальное время выполнения команд по расписанию. Установите 0, чтобы отключить таймаут.",
+      "max_tokens": "Макс. токены",
+      "max_tokens_hint": "Верхний лимит токенов на ответ модели.",
+      "context_window": "Контекстное окно",
+      "context_window_hint": "Вместимость входного контекста модели в токенах. Оставьте пустым, чтобы использовать значение по умолчанию (4x max tokens).",
+      "max_tool_iterations": "Макс. итерации инструментов",
+      "max_tool_iterations_hint": "Максимальное число циклов вызова инструментов в одной задаче.",
+      "summarize_threshold": "Порог суммаризации сообщений",
+      "summarize_threshold_hint": "Начинать суммаризацию после такого количества сообщений.",
+      "summarize_token_percent": "Процент токенов для суммаризации",
+      "summarize_token_percent_hint": "Используется при запуске суммаризации диалога.",
+      "session_scope": "Область сессии",
+      "session_scope_hint": "Как изолируется контекст чата между собеседниками и каналами.",
+      "session_scope_per_channel_peer": "На канал + собеседника",
+      "session_scope_per_channel_peer_desc": "Отдельный контекст для каждого пользователя в каждом канале.",
+      "session_scope_per_channel": "На канал",
+      "session_scope_per_channel_desc": "Один общий контекст на канал.",
+      "session_scope_per_peer": "На собеседника",
+      "session_scope_per_peer_desc": "Один контекст на пользователя во всех каналах.",
+      "session_scope_global": "Глобально",
+      "session_scope_global_desc": "Все сообщения используют один общий контекст.",
+      "heartbeat_enabled": "Heartbeat",
+      "heartbeat_enabled_hint": "Отправлять периодические heartbeat-сообщения.",
+      "heartbeat_interval": "Интервал heartbeat (минуты)",
+      "heartbeat_interval_hint": "Интервал в минутах между heartbeat-сигналами.",
+      "devices_enabled": "Включить устройства",
+      "devices_enabled_hint": "Включить интеграции с аппаратными устройствами.",
+      "monitor_usb": "Следить за USB",
+      "monitor_usb_hint": "Отслеживать события подключения и отключения USB, когда устройства включены.",
+      "autostart_label": "Запускать при входе в систему",
+      "autostart_hint": "Автоматически запускать RuClaw Launcher после входа в систему.",
+      "autostart_unsupported": "Запуск при входе в систему не поддерживается на этой платформе.",
+      "autostart_load_error": "Не удалось загрузить статус автозапуска.",
+      "server_port": "Порт сервиса",
+      "server_port_hint": "HTTP-порт, используемый RuClaw Launcher.",
+      "launcher_token": "Токен входа",
+      "launcher_token_section_hint": "Изменения в этом разделе вступят в силу после перезапуска launcher.",
+      "launcher_token_hint": "Используется для входа на страницу launcher-login.",
+      "launcher_token_placeholder": "Введите токен входа",
+      "lan_access": "Включить доступ по LAN",
+      "lan_access_hint": "Разрешить доступ с других устройств в вашей локальной сети.",
+      "allowed_cidrs": "Разрешённые CIDR-сети",
+      "allowed_cidrs_hint": "Доступ к сервису получат только клиенты из этих CIDR-диапазонов. По одному на строку или через запятую. Оставьте пустым, чтобы разрешить всем.",
+      "allowed_cidrs_placeholder": "192.168.1.0/24\n10.0.0.0/8",
+      "sections": {
+        "agent": "Агент",
+        "runtime": "Рантайм",
+        "exec": "Выполнение команд",
+        "cron": "Cron-задачи",
+        "launcher": "Launcher",
+        "devices": "Устройства"
+      },
+      "open_raw": "Raw конфиг",
+      "back_to_visual": "Визуальный конфиг",
+      "raw_json_title": "Конфигурация в формате JSON",
+      "json_placeholder": "Введите корректную JSON-конфигурацию...",
+      "save_success": "Конфигурация успешно сохранена.",
+      "save_error": "Не удалось сохранить конфигурацию.",
+      "reset_confirm_title": "Сбросить изменения",
+      "reset_confirm_desc": "Вы действительно хотите сбросить несохранённые изменения до последнего сохранённого состояния?",
+      "reset_success": "Изменения сброшены до последнего сохранённого состояния.",
+      "invalid_json": "Некорректный формат JSON.",
+      "format_success": "JSON успешно отформатирован.",
+      "format_error": "Некорректный формат JSON.",
+      "format": "Форматировать",
+      "unsaved_changes": "У вас есть несохранённые изменения."
+    },
+    "logs": {
+      "log_level_error": "Не удалось обновить уровень логирования.",
+      "clear": "Очистить логи",
+      "empty": "Ожидание логов..."
+    }
+  },
+  "tour": {
+    "skip": "Пропустить",
+    "prev": "Назад",
+    "next": "Далее",
+    "finish": "Готово",
+    "welcome": {
+      "title": "Добро пожаловать в RuClaw",
+      "description": "RuClaw — это мощная платформа AI-ассистента. Давайте потратим несколько секунд и завершим базовую настройку."
+    },
+    "models": {
+      "title": "Настройка моделей",
+      "description": "Нажмите меню «Модели» слева, чтобы настроить API-ключи для AI-провайдеров. В чате можно использовать только настроенные модели."
+    },
+    "gateway": {
+      "title": "Запуск шлюза",
+      "description": "После настройки моделей нажмите кнопку «Запустить шлюз» сверху, чтобы начать общение с AI."
+    },
+    "docs": {
+      "title": "Открыть документацию",
+      "description": "Нужна дополнительная помощь? Нажмите кнопку документации в правом верхнем углу, чтобы открыть подробные руководства и документацию по настройке."
+    }
+  }
+}

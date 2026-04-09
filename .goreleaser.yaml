@@ -1,0 +1,340 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+version: 2
+project_name: ruclaw
+
+git:
+  ignore_tags:
+    - nightly
+    - ".*-nightly.*"
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+    - sh -c 'cd web/frontend && pnpm install && pnpm build:backend'
+    - go install github.com/tc-hib/go-winres@latest
+    - go-winres make --in web/backend/winres/winres.json --out web/backend/rsrc --product-version={{ .Version }} --file-version={{ .Version }}
+
+builds:
+  - id: ruclaw
+    binary: ruclaw
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/Perdonus/ruclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+      - loong64
+      - arm
+      - s390x
+      - mipsle
+    goarm:
+      - "6"
+      - "7"
+    gomips:
+      - softfloat
+    main: ./cmd/picoclaw
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: netbsd
+        goarch: s390x
+      - goos: netbsd
+        goarch: mips64
+      - goos: netbsd
+        goarch: arm
+
+  - id: ruclaw-android
+    binary: ruclaw
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/Perdonus/ruclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+    goos:
+      - android
+    goarch:
+      - arm64
+    main: ./cmd/picoclaw
+
+  - id: ruclaw-launcher
+    binary: ruclaw-launcher
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+      - loong64
+      - arm
+      - s390x
+      - mipsle
+    goarm:
+      - "6"
+      - "7"
+    gomips:
+      - softfloat
+    main: ./web/backend
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: netbsd
+        goarch: s390x
+      - goos: netbsd
+        goarch: mips64
+      - goos: netbsd
+        goarch: arm
+
+  - id: ruclaw-launcher-tui
+    binary: ruclaw-launcher-tui
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+      - darwin
+      - freebsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+      - loong64
+      - arm
+      - s390x
+      - mipsle
+    goarm:
+      - "6"
+      - "7"
+    gomips:
+      - softfloat
+    main: ./cmd/picoclaw-launcher-tui
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: netbsd
+        goarch: s390x
+      - goos: netbsd
+        goarch: mips64
+      - goos: netbsd
+        goarch: arm
+
+  - id: picoclaw-compat
+    binary: picoclaw
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+      - -X github.com/Perdonus/ruclaw/pkg/config.Version={{ .Version }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GitCommit={{ .ShortCommit }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.BuildTime={{ .Date }}
+      - -X github.com/Perdonus/ruclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+    main: ./cmd/picoclaw
+
+  - id: picoclaw-launcher-compat
+    binary: picoclaw-launcher
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+    main: ./web/backend
+
+  - id: picoclaw-launcher-tui-compat
+    binary: picoclaw-launcher-tui
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - goolm
+      - stdjson
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+    main: ./cmd/picoclaw-launcher-tui
+
+dockers_v2:
+  - id: ruclaw
+    dockerfile: docker/Dockerfile.goreleaser
+    extra_files:
+      - docker/entrypoint.sh
+    ids:
+      - picoclaw-compat
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ruclaw"
+      - 'docker.io/{{ .Env.DOCKERHUB_IMAGE_NAME }}'
+    tags:
+      - '{{ if isEnvSet "NIGHTLY_BUILD" }}nightly{{ else }}{{ .Tag }}{{ end }}'
+      - '{{ if isEnvSet "NIGHTLY_BUILD" }}nightly{{ else }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/riscv64
+
+  - id: ruclaw-launcher
+    dockerfile: docker/Dockerfile.goreleaser.launcher
+    ids:
+      - picoclaw-compat
+      - picoclaw-launcher-compat
+      - picoclaw-launcher-tui-compat
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ruclaw"
+      - 'docker.io/{{ .Env.DOCKERHUB_IMAGE_NAME }}'
+    tags:
+      - '{{ if isEnvSet "NIGHTLY_BUILD" }}nightly-launcher{{ else }}{{ .Tag }}-launcher{{ end }}'
+      - '{{ if isEnvSet "NIGHTLY_BUILD" }}nightly-launcher{{ else }}launcher{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/riscv64
+
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids:
+        - ruclaw
+        - ruclaw-launcher
+        - ruclaw-launcher-tui
+      sign:
+        certificate: "{{.Env.MACOS_SIGN_P12}}"
+        password: "{{.Env.MACOS_SIGN_PASSWORD}}"
+      notarize:
+        issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
+        key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
+        key: "{{.Env.MACOS_NOTARY_KEY}}"
+        wait: true
+        timeout: 20m
+
+archives:
+  - ids:
+      - ruclaw
+      - ruclaw-android
+      - ruclaw-launcher
+      - ruclaw-launcher-tui
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+nfpms:
+  - id: ruclaw
+    ids:
+      - ruclaw
+      - ruclaw-launcher
+      - ruclaw-launcher-tui
+    package_name: ruclaw
+    file_name_template: >-
+      {{ .PackageName }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else if eq .Arch "arm" }}armv{{ .Arm }}
+      {{- else }}{{ .Arch }}{{ end }}
+    vendor: RuClaw
+    homepage: https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/ruclaw
+    maintainer: RuClaw contributors
+    description: ruclaw - lightweight personal AI assistant
+    license: MIT
+    formats:
+      - rpm
+      - deb
+    bindir: /usr/bin
+    contents:
+      - src: web/ruclaw-launcher.desktop
+        dst: /usr/share/applications/ruclaw-launcher.desktop
+      - src: web/ruclaw-launcher.png
+        dst: /usr/share/icons/hicolor/512x512/apps/ruclaw-launcher.png
+      - src: /usr/bin/ruclaw
+        dst: /usr/bin/picoclaw
+        type: symlink
+      - src: /usr/bin/ruclaw-launcher
+        dst: /usr/bin/picoclaw-launcher
+        type: symlink
+      - src: /usr/bin/ruclaw-launcher-tui
+        dst: /usr/bin/picoclaw-launcher-tui
+        type: symlink
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+# upx:
+#    - enabled: true
+#      compress: best
+#      lzma: true
+
+release:
+  disable: '{{ isEnvSet "NIGHTLY_BUILD" }}'
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
