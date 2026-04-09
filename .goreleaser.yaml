@@ -60,25 +60,6 @@ builds:
       - goos: netbsd
         goarch: arm
 
-  - id: ruclaw-android
-    binary: ruclaw
-    env:
-      - CGO_ENABLED=0
-    tags:
-      - goolm
-      - stdjson
-    ldflags:
-      - -s -w
-      - -X github.com/Perdonus/ruclaw/pkg/config.Version={{ .Version }}
-      - -X github.com/Perdonus/ruclaw/pkg/config.GitCommit={{ .ShortCommit }}
-      - -X github.com/Perdonus/ruclaw/pkg/config.BuildTime={{ .Date }}
-      - -X github.com/Perdonus/ruclaw/pkg/config.GoVersion={{ .Env.GOVERSION }}
-    goos:
-      - android
-    goarch:
-      - arm64
-    main: ./cmd/picoclaw
-
   - id: ruclaw-launcher
     binary: ruclaw-launcher
     env:
@@ -267,7 +248,6 @@ notarize:
 archives:
   - ids:
       - ruclaw
-      - ruclaw-android
       - ruclaw-launcher
       - ruclaw-launcher-tui
     formats: [tar.gz]

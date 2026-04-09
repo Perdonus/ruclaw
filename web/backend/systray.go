@@ -1,4 +1,4 @@
-//go:build (!darwin && !freebsd) || cgo
+//go:build cgo
 
 package main
 
