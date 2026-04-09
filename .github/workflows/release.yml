@@ -22,9 +22,13 @@ on:
         required: false
         type: boolean
         default: true
+  push:
+    tags:
+      - "v*"
 
 jobs:
   create-tag:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     name: Create Git Tag
     runs-on: ubuntu-latest
     permissions:
@@ -45,8 +49,9 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
           git push origin "$RELEASE_TAG"
 
-  release:
-    name: GoReleaser Release
+  release-manual:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    name: GoReleaser Release (manual)
     needs: create-tag
     runs-on: ubuntu-latest
     permissions:
@@ -119,10 +124,75 @@ jobs:
             --draft=${{ inputs.draft }} \
             --prerelease=${{ inputs.prerelease }}
 
+  release-tag:
+    if: ${{ github.event_name == 'push' }}
+    name: GoReleaser Release (tag push)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Setup Go from go.mod
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: ~> v2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_IMAGE_NAME: ${{ vars.DOCKERHUB_REPOSITORY }}
+          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
   upload-tos:
     name: Upload to TOS
-    needs: release
-    if: ${{ inputs.upload_tos }}
+    needs: release-manual
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_tos }}
     uses: ./.github/workflows/upload-tos.yml
     with:
       tag: ${{ inputs.tag }}
