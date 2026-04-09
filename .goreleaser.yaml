@@ -120,6 +120,8 @@ builds:
       - softfloat
     main: ./web/backend
     ignore:
+      - goos: linux
+        goarch: mipsle
       - goos: windows
         goarch: arm
       - goos: windows
@@ -141,11 +143,17 @@ builds:
       - goos: darwin
         goarch: mipsle
       - goos: freebsd
+        goarch: arm
+      - goos: freebsd
         goarch: loong64
       - goos: freebsd
         goarch: s390x
       - goos: freebsd
         goarch: mipsle
+      - goos: netbsd
+        goarch: amd64
+      - goos: netbsd
+        goarch: arm64
       - goos: netbsd
         goarch: riscv64
       - goos: netbsd
