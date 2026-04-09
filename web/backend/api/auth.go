@@ -121,7 +121,7 @@ func (h *launcherAuthHandlers) handleLogin(w http.ResponseWriter, r *http.Reques
 			initialized = false
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
-			writeErrorf(w, "%v", initErr)
+			writeErrorMessage(w, fmt.Sprintf("%v", initErr))
 			return
 		}
 	}
