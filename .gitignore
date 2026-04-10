@@ -70,3 +70,10 @@ web/backend/dist/*
 docker/data
 
 .omc/
+
+# Android
+.gradle/
+.gradle-wrapper/
+android-app/.gradle/
+android-app/.gradle-wrapper/
+android-app/local.properties
