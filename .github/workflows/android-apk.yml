@@ -46,7 +46,7 @@ jobs:
       - name: Build debug APK
         run: |
           set -o pipefail
-          ./gradlew --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log
+          ./gradlew --no-daemon --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log
 
       - name: Surface Gradle failure
         if: failure()

@@ -84,7 +84,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -o pipefail
-          ./gradlew --stacktrace --console=plain assembleRelease \
+          ./gradlew --no-daemon --stacktrace --console=plain assembleRelease \
             -PCI_VERSION_NAME=${{ steps.meta.outputs.version_name }} \
             -PCI_VERSION_CODE=${{ steps.meta.outputs.version_code }} 2>&1 | tee gradle-release.log
 
