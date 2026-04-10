@@ -5,6 +5,10 @@ import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.ComposerState
 import com.perdonus.ruclaw.android.core.model.ConnectionState
 import com.perdonus.ruclaw.android.core.model.LauncherConfigDraft
+import com.perdonus.ruclaw.android.core.model.LauncherModelItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
+import com.perdonus.ruclaw.android.core.model.LauncherToolItem
 
 data class MainUiState(
     val isLoaded: Boolean = false,
@@ -18,11 +22,27 @@ data class MainUiState(
     val isRefreshing: Boolean = false,
     val isHistoryLoading: Boolean = false,
     val showSettings: Boolean = false,
+    val showAgentSheet: Boolean = false,
+    val launcherCatalog: LauncherCatalogState = LauncherCatalogState(),
     val bannerMessage: String? = null,
     val pendingExternalUrl: String? = null,
     val pendingSystemAction: PendingSystemAction? = null,
     val updateState: UpdateUiState = UpdateUiState(),
     val diagnostics: List<String> = emptyList(),
+)
+
+data class LauncherCatalogState(
+    val isLoading: Boolean = false,
+    val isLoaded: Boolean = false,
+    val models: List<LauncherModelItem> = emptyList(),
+    val skills: List<LauncherSkillItem> = emptyList(),
+    val tools: List<LauncherToolItem> = emptyList(),
+    val skillSearchQuery: String = "",
+    val skillSearchResults: List<LauncherSkillSearchItem> = emptyList(),
+    val isSearchingSkills: Boolean = false,
+    val updatingModelName: String? = null,
+    val updatingToolName: String? = null,
+    val installingSkillSlug: String? = null,
 )
 
 data class UpdateUiState(

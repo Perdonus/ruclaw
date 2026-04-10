@@ -64,6 +64,52 @@ data class LauncherConfigDraft(
 data class ComposerState(
     val text: String = "",
     val isSending: Boolean = false,
+    val attachments: List<ComposerAttachment> = emptyList(),
+)
+
+data class ComposerAttachment(
+    val url: String,
+    val filename: String = "",
+    val mimeType: String = "",
+)
+
+data class LauncherModelItem(
+    val index: Int,
+    val modelName: String,
+    val status: String,
+    val available: Boolean,
+    val isDefault: Boolean,
+    val isVirtual: Boolean,
+    val authMethod: String = "",
+)
+
+data class LauncherSkillItem(
+    val name: String,
+    val description: String,
+    val source: String,
+    val originKind: String,
+    val registryName: String = "",
+    val registryUrl: String = "",
+    val installedVersion: String = "",
+)
+
+data class LauncherSkillSearchItem(
+    val slug: String,
+    val displayName: String,
+    val summary: String,
+    val version: String,
+    val registryName: String,
+    val url: String = "",
+    val installed: Boolean = false,
+    val installedName: String = "",
+)
+
+data class LauncherToolItem(
+    val name: String,
+    val description: String,
+    val category: String,
+    val status: String,
+    val reasonCode: String = "",
 )
 
 data class ConnectionState(

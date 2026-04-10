@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            RuClawTheme {
+            RuClawTheme(darkTheme = true) {
                 MainScreen(viewModel = viewModel)
             }
         }

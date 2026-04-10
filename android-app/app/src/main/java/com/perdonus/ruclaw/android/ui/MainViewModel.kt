@@ -1,6 +1,9 @@
 package com.perdonus.ruclaw.android.ui
 
 import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.perdonus.ruclaw.android.BuildConfig
@@ -10,10 +13,15 @@ import com.perdonus.ruclaw.android.core.model.CachedSession
 import com.perdonus.ruclaw.android.core.model.ChatMessage
 import com.perdonus.ruclaw.android.core.model.ChatRole
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
+import com.perdonus.ruclaw.android.core.model.ComposerAttachment
 import com.perdonus.ruclaw.android.core.model.ComposerState
 import com.perdonus.ruclaw.android.core.model.ConnectionState
 import com.perdonus.ruclaw.android.core.model.ConnectionStatus
 import com.perdonus.ruclaw.android.core.model.LauncherConfigDraft
+import com.perdonus.ruclaw.android.core.model.LauncherModelItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
+import com.perdonus.ruclaw.android.core.model.LauncherToolItem
 import com.perdonus.ruclaw.android.core.model.MessageStatus
 import com.perdonus.ruclaw.android.core.model.PersistedDownloadState
 import com.perdonus.ruclaw.android.core.model.PersistedUpdateState
@@ -27,6 +35,7 @@ import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawLauncherClient
 import com.perdonus.ruclaw.android.data.remote.update.ReleaseFeedClient
 import com.perdonus.ruclaw.android.data.update.ApkDownloadState
 import com.perdonus.ruclaw.android.data.update.ApkUpdateManager
+import java.io.IOException
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
@@ -41,6 +50,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        private const val MAX_COMPOSER_IMAGE_BYTES = 7L * 1024L * 1024L
+    }
+
     private val container = (application as RuClawMobileApp).container
     private val localStateRepository: LocalStateRepository = container.localStateRepository
     private val launcherClient: RuClawLauncherClient = container.newLauncherClient()
@@ -96,6 +109,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 launcherConfig = it.launcherConfig.copy(url = value),
+                launcherCatalog = LauncherCatalogState(),
             )
         }
     }
@@ -104,6 +118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 launcherConfig = it.launcherConfig.copy(token = value),
+                launcherCatalog = LauncherCatalogState(),
             )
         }
     }
@@ -116,7 +131,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun applySuggestion(text: String) {
         _uiState.update {
-            it.copy(composer = ComposerState(text = text, isSending = false))
+            it.copy(
+                composer = it.composer.copy(
+                    text = text,
+                    isSending = false,
+                ),
+            )
         }
     }
 
@@ -133,6 +153,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             cancelReconnectLoop()
             closeSocket()
             cachedHandshake = null
+            _uiState.update {
+                it.copy(
+                    showAgentSheet = false,
+                    launcherCatalog = LauncherCatalogState(),
+                )
+            }
             updateConnectionState(ConnectionStatus.DISCONNECTED, "Отключено")
         }
     }
@@ -216,8 +242,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun sendMessage() {
-        val rawText = _uiState.value.composer.text.trim()
-        if (rawText.isBlank()) {
+        val composerState = _uiState.value.composer
+        if (composerState.isSending) {
+            return
+        }
+        val rawText = composerState.text.trim()
+        val rawAttachments = composerState.attachments.map { it.url }
+        if (rawText.isBlank() && rawAttachments.isEmpty()) {
             return
         }
 
@@ -241,11 +272,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
                 }
 
-                val requestId = "msg-${System.currentTimeMillis()}"
+                val requestId = "msg-" + System.currentTimeMillis()
                 val userMessage = ChatMessage(
                     id = requestId,
                     role = ChatRole.USER,
                     text = rawText,
+                    attachments = rawAttachments,
                     status = MessageStatus.COMPLETE,
                     createdAtEpochMillis = System.currentTimeMillis(),
                 )
@@ -253,18 +285,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(
                         messages = nextMessages,
-                        composer = it.composer.copy(text = "", isSending = true),
+                        composer = it.composer.copy(
+                            text = "",
+                            isSending = true,
+                            attachments = emptyList(),
+                        ),
                         isTyping = true,
                     )
                 }
                 persistSession(sessionId, nextMessages)
 
-                val sent = socket?.sendMessage(requestId, rawText) == true
+                val sent = socket?.sendMessage(
+                    requestId = requestId,
+                    content = rawText,
+                    media = rawAttachments,
+                ) == true
                 if (!sent) {
                     _uiState.update {
                         it.copy(
                             messages = it.messages.filterNot { message -> message.id == requestId },
-                            composer = it.composer.copy(text = rawText, isSending = false),
+                            composer = it.composer.copy(
+                                text = rawText,
+                                isSending = false,
+                                attachments = composerState.attachments,
+                            ),
                             isTyping = false,
                         )
                     }
@@ -279,7 +323,320 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSettings(show: Boolean = !_uiState.value.showSettings) {
-        _uiState.update { it.copy(showSettings = show) }
+        _uiState.update {
+            it.copy(
+                showSettings = show,
+                showAgentSheet = if (show) false else it.showAgentSheet,
+            )
+        }
+    }
+
+    fun toggleAgentSheet(show: Boolean = !_uiState.value.showAgentSheet) {
+        _uiState.update {
+            it.copy(
+                showAgentSheet = show,
+                showSettings = if (show) false else it.showSettings,
+            )
+        }
+        if (show) {
+            refreshLauncherCatalog(force = false, silent = true)
+        }
+    }
+
+    fun refreshLauncherCatalog(
+        force: Boolean = true,
+        silent: Boolean = false,
+    ) {
+        viewModelScope.launch {
+            val current = _uiState.value.launcherCatalog
+            if (!force && (current.isLoaded || current.isLoading)) {
+                return@launch
+            }
+            val config = resolvedLauncherConfig() ?: run {
+                _uiState.update {
+                    it.copy(launcherCatalog = LauncherCatalogState())
+                }
+                if (!silent) {
+                    showMessage("Сначала подключи launcher.")
+                }
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    launcherCatalog = it.launcherCatalog.copy(
+                        isLoading = true,
+                    ),
+                )
+            }
+
+            try {
+                val models = launcherClient.listModels(config.url, config.token)
+                val skills = launcherClient.listSkills(config.url, config.token)
+                val tools = launcherClient.listTools(config.url, config.token)
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            isLoading = false,
+                            isLoaded = true,
+                            models = models,
+                            skills = skills,
+                            tools = tools,
+                            updatingModelName = null,
+                            updatingToolName = null,
+                            installingSkillSlug = null,
+                        ),
+                    )
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) {
+                    throw error
+                }
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            isLoading = false,
+                            updatingModelName = null,
+                            updatingToolName = null,
+                            installingSkillSlug = null,
+                        ),
+                    )
+                }
+                if (!silent) {
+                    showMessage(error.message ?: "Не удалось загрузить модели, навыки и инструменты.")
+                }
+            }
+        }
+    }
+
+    fun setDefaultLauncherModel(modelName: String) {
+        viewModelScope.launch {
+            val config = resolvedLauncherConfig() ?: run {
+                showMessage("Сначала подключи launcher.")
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    launcherCatalog = it.launcherCatalog.copy(updatingModelName = modelName),
+                )
+            }
+
+            try {
+                launcherClient.setDefaultModel(config.url, config.token, modelName)
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            updatingModelName = null,
+                            models = it.launcherCatalog.models.map { model ->
+                                model.copy(isDefault = model.modelName == modelName)
+                            },
+                        ),
+                    )
+                }
+                showMessage("Модель по умолчанию: " + modelName)
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(updatingModelName = null),
+                    )
+                }
+                if (error is CancellationException) {
+                    throw error
+                }
+                showMessage(error.message ?: "Не удалось переключить модель.")
+            }
+        }
+    }
+
+    fun onSkillSearchQueryChanged(value: String) {
+        _uiState.update {
+            it.copy(
+                launcherCatalog = it.launcherCatalog.copy(
+                    skillSearchQuery = value,
+                    skillSearchResults = if (value.isBlank()) emptyList() else it.launcherCatalog.skillSearchResults,
+                ),
+            )
+        }
+    }
+
+    fun searchLauncherSkills() {
+        viewModelScope.launch {
+            val config = resolvedLauncherConfig() ?: run {
+                showMessage("Сначала подключи launcher.")
+                return@launch
+            }
+            val query = _uiState.value.launcherCatalog.skillSearchQuery.trim()
+            if (query.isBlank()) {
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            skillSearchResults = emptyList(),
+                            isSearchingSkills = false,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    launcherCatalog = it.launcherCatalog.copy(isSearchingSkills = true),
+                )
+            }
+
+            try {
+                val results = launcherClient.searchSkills(config.url, config.token, query)
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            isSearchingSkills = false,
+                            skillSearchResults = results,
+                        ),
+                    )
+                }
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(isSearchingSkills = false),
+                    )
+                }
+                if (error is CancellationException) {
+                    throw error
+                }
+                showMessage(error.message ?: "Не удалось найти навыки.")
+            }
+        }
+    }
+
+    fun installLauncherSkill(item: LauncherSkillSearchItem) {
+        viewModelScope.launch {
+            val config = resolvedLauncherConfig() ?: run {
+                showMessage("Сначала подключи launcher.")
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    launcherCatalog = it.launcherCatalog.copy(installingSkillSlug = item.slug),
+                )
+            }
+
+            try {
+                val installedSkill = launcherClient.installSkill(
+                    baseUrl = config.url,
+                    launcherToken = config.token,
+                    slug = item.slug,
+                    registryName = item.registryName,
+                    version = item.version,
+                )
+                val skills = launcherClient.listSkills(config.url, config.token)
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            installingSkillSlug = null,
+                            skills = skills,
+                            skillSearchResults = it.launcherCatalog.skillSearchResults.map { result ->
+                                if (result.slug == item.slug && result.registryName == item.registryName) {
+                                    result.copy(
+                                        installed = true,
+                                        installedName = installedSkill?.name ?: result.installedName,
+                                    )
+                                } else {
+                                    result
+                                }
+                            },
+                        ),
+                    )
+                }
+                showMessage("Навык установлен: " + (installedSkill?.name ?: item.displayName))
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(installingSkillSlug = null),
+                    )
+                }
+                if (error is CancellationException) {
+                    throw error
+                }
+                showMessage(error.message ?: "Не удалось установить навык.")
+            }
+        }
+    }
+
+    fun useLauncherSkill(skill: LauncherSkillItem) {
+        _uiState.update {
+            val currentText = it.composer.text.trim()
+            val command = if (currentText.isBlank()) {
+                "/use " + skill.name + " "
+            } else if (currentText.startsWith("/use ")) {
+                val message = currentText.split(" ", limit = 3).getOrNull(2).orEmpty()
+                if (message.isBlank()) {
+                    "/use " + skill.name + " "
+                } else {
+                    "/use " + skill.name + " " + message
+                }
+            } else {
+                "/use " + skill.name + " " + currentText
+            }
+            it.copy(
+                showAgentSheet = false,
+                composer = it.composer.copy(text = command),
+            )
+        }
+    }
+
+    fun toggleLauncherTool(
+        tool: LauncherToolItem,
+        enabled: Boolean,
+    ) {
+        viewModelScope.launch {
+            val config = resolvedLauncherConfig() ?: run {
+                showMessage("Сначала подключи launcher.")
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    launcherCatalog = it.launcherCatalog.copy(updatingToolName = tool.name),
+                )
+            }
+
+            try {
+                launcherClient.setToolEnabled(
+                    baseUrl = config.url,
+                    launcherToken = config.token,
+                    name = tool.name,
+                    enabled = enabled,
+                )
+                val tools = launcherClient.listTools(config.url, config.token)
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(
+                            updatingToolName = null,
+                            tools = tools,
+                        ),
+                    )
+                }
+                showMessage(
+                    if (enabled) {
+                        "Инструмент включён: " + tool.name
+                    } else {
+                        "Инструмент выключен: " + tool.name
+                    },
+                )
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        launcherCatalog = it.launcherCatalog.copy(updatingToolName = null),
+                    )
+                }
+                if (error is CancellationException) {
+                    throw error
+                }
+                showMessage(error.message ?: "Не удалось переключить инструмент.")
+            }
+        }
     }
 
     fun checkForUpdates(silent: Boolean = false) {
@@ -407,6 +764,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(bannerMessage = null) }
     }
 
+    fun addComposerPhoto(uri: Uri) {
+        viewModelScope.launch {
+            val attachment = runCatching { readComposerAttachment(uri) }.getOrElse { error ->
+                showMessage(error.message ?: "Не удалось прикрепить фото.")
+                return@launch
+            }
+            _uiState.update {
+                it.copy(
+                    composer = it.composer.copy(
+                        attachments = (it.composer.attachments + attachment).take(1),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun removeComposerAttachment(index: Int) {
+        _uiState.update {
+            it.copy(
+                composer = it.composer.copy(
+                    attachments = it.composer.attachments.filterIndexed { itemIndex, _ -> itemIndex != index },
+                ),
+            )
+        }
+    }
+
     fun openExternalUrl(url: String) {
         _uiState.update { it.copy(pendingExternalUrl = url) }
     }
@@ -480,6 +863,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             openSocket(config.url, config.token, handshake, sessionId)
             reconnectAttempts = 0
             updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
+            refreshLauncherCatalog(force = true, silent = true)
         } catch (error: Throwable) {
             shouldMaintainConnection = false
             handleConnectionError(error, silent)
@@ -569,19 +953,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             is PicoEvent.ProtocolError -> {
-                val filteredMessages = if (event.requestId != null) {
-                    _uiState.value.messages.filterNot { it.id == event.requestId }
-                } else {
-                    _uiState.value.messages
-                }
                 _uiState.update {
                     it.copy(
-                        messages = filteredMessages,
                         isTyping = false,
                         composer = it.composer.copy(isSending = false),
                     )
                 }
-                persistSession(expectedSessionId, filteredMessages)
+                persistSession(expectedSessionId, _uiState.value.messages)
                 showMessage(event.message.ifBlank { "Launcher вернул ошибку." })
             }
 
@@ -594,10 +972,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             is PicoEvent.SocketFailure -> {
-                if (shouldMaintainConnection) {
-                    scheduleReconnect(expectedSessionId, event.reason)
+                val failureMessage = describeLauncherFailure(event.statusCode, event.reason)
+                if (event.statusCode == 401) {
+                    shouldMaintainConnection = false
+                    updateConnectionState(ConnectionStatus.FAILED_AUTH, failureMessage)
+                    showMessage(failureMessage)
+                } else if (event.statusCode == 403) {
+                    shouldMaintainConnection = false
+                    updateConnectionState(ConnectionStatus.FAILED_NETWORK, failureMessage)
+                    showMessage(failureMessage)
+                } else if (shouldMaintainConnection) {
+                    scheduleReconnect(expectedSessionId, failureMessage)
                 } else {
-                    updateConnectionState(ConnectionStatus.FAILED_NETWORK, event.reason)
+                    updateConnectionState(ConnectionStatus.FAILED_NETWORK, failureMessage)
                 }
             }
 
@@ -661,7 +1048,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error.statusCode == 401) {
                     ConnectionStatus.FAILED_AUTH to "Launcher access token не подошёл."
                 } else {
-                    ConnectionStatus.FAILED_NETWORK to error.message
+                    ConnectionStatus.FAILED_NETWORK to describeLauncherFailure(error.statusCode, error.message)
                 }
             }
 
@@ -948,6 +1335,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return value.removePrefix("v")
             .split(Regex("[^A-Za-z0-9]+"))
             .filter { it.isNotBlank() }
+    }
+
+    private fun describeLauncherFailure(statusCode: Int?, fallback: String): String {
+        return when (statusCode) {
+            401 -> "Launcher access token не подошёл."
+            403 -> "Launcher отклонил подключение к чату. Проверь сеть и доступ с телефона."
+            429 -> "Launcher упёрся в лимит запросов. Подожди немного и отправь ещё раз."
+            502 -> "Launcher не достучался до gateway. Подожди пару секунд и попробуй снова."
+            503 -> "Launcher chat временно недоступен. Gateway ещё поднимается или занят."
+            504 -> "Launcher не дождался ответа от gateway. Повтори запрос чуть позже."
+            553 -> "Launcher вернул нестандартную сетевую ошибку по чату. Обычно это временный сбой шлюза."
+            in 500..599 -> "Launcher временно не отвечает по чату. Повтори запрос чуть позже."
+            else -> fallback.ifBlank { "Не удалось подключиться к launcher." }
+        }
+    }
+
+    private fun readComposerAttachment(uri: Uri): ComposerAttachment {
+        val resolver = getApplication<Application>().contentResolver
+        val mimeType = resolver.getType(uri).orEmpty().ifBlank { "image/jpeg" }
+        if (!mimeType.startsWith("image/")) {
+            throw IOException("Можно прикреплять только изображения.")
+        }
+
+        val meta = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    null
+                } else {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    val fileName = if (nameIndex >= 0) cursor.getString(nameIndex) else "image"
+                    val fileSize = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else null
+                    fileName to fileSize
+                }
+            }
+
+        val bytes = resolver.openInputStream(uri)?.use { input -> input.readBytes() }
+            ?: throw IOException("Не удалось прочитать изображение.")
+
+        val sizeBytes = meta?.second ?: bytes.size.toLong()
+        if (sizeBytes > MAX_COMPOSER_IMAGE_BYTES) {
+            throw IOException("Фото больше 7 МБ, выбери файл поменьше.")
+        }
+
+        val dataUrl = "data:" + mimeType + ";base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        return ComposerAttachment(
+            url = dataUrl,
+            filename = meta?.first.orEmpty(),
+            mimeType = mimeType,
+        )
     }
 
     override fun onCleared() {

@@ -5,22 +5,31 @@
 package com.perdonus.ruclaw.android.ui
 
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.Settings
-
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -35,6 +44,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -46,30 +56,27 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Cable
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -80,14 +87,18 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -102,9 +113,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.perdonus.ruclaw.android.core.model.ChatMessage
 import com.perdonus.ruclaw.android.core.model.ChatRole
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
+import com.perdonus.ruclaw.android.core.model.ComposerAttachment
 import com.perdonus.ruclaw.android.core.model.ConnectionStatus
 import com.perdonus.ruclaw.android.ui.components.MarkdownMessage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun MainScreen(viewModel: MainViewModel) {
@@ -113,10 +127,17 @@ fun MainScreen(viewModel: MainViewModel) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.addComposerPhoto(uri)
+        }
+    }
 
     LaunchedEffect(state.bannerMessage) {
-        state.bannerMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        state.bannerMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
             viewModel.consumeBannerMessage()
         }
     }
@@ -134,9 +155,10 @@ fun MainScreen(viewModel: MainViewModel) {
             PendingSystemActionType.OPEN_UNKNOWN_SOURCES_SETTINGS -> {
                 Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:${context.packageName}"),
+                    Uri.parse("package:" + context.packageName),
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+
             PendingSystemActionType.INSTALL_APK -> {
                 val targetUri = action.uri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
                 Intent(Intent.ACTION_VIEW).apply {
@@ -155,29 +177,25 @@ fun MainScreen(viewModel: MainViewModel) {
         return
     }
 
-    val showWelcomeGate = !state.hasConfiguredLauncher && state.threads.isEmpty() && state.messages.isEmpty()
-
     Box(modifier = Modifier.fillMaxSize()) {
         AnimatedBackdrop(modifier = Modifier.fillMaxSize())
         StageScrims()
 
-        if (showWelcomeGate) {
-            WelcomeGate(
-                state = state,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            ConnectedSurface(
-                state = state,
-                viewModel = viewModel,
-                onPathClick = { path ->
-                    clipboardManager.setText(AnnotatedString(path))
-                    viewModel.announceDownloadPath(path)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        ConnectedSurface(
+            state = state,
+            viewModel = viewModel,
+            onPathClick = { path ->
+                clipboardManager.setText(AnnotatedString(path))
+                viewModel.announceDownloadPath(path)
+            },
+            onAddPhoto = {
+                photoPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            },
+            onOpenAgentSheet = { viewModel.toggleAgentSheet(true) },
+            modifier = Modifier.fillMaxSize(),
+        )
 
         SnackbarHost(
             hostState = snackbarHostState,
@@ -189,7 +207,18 @@ fun MainScreen(viewModel: MainViewModel) {
     }
 
     if (state.showSettings) {
-        SettingsSheet(state = state, viewModel = viewModel)
+        SettingsSheet(
+            state = state,
+            viewModel = viewModel,
+        )
+    }
+
+    if (state.showAgentSheet) {
+        AgentSheet(
+            state = state,
+            viewModel = viewModel,
+            onNewSession = viewModel::newSession,
+        )
     }
 }
 
@@ -198,17 +227,17 @@ private fun LoadingShell() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0E1117)),
+            .background(Color(0xFF0B1017)),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            CircularProgressIndicator()
+            CircularProgressIndicator(color = Color(0xFF72D8C4))
             Text(
                 text = "Поднимаю RuClaw Android…",
-                color = Color(0xFFF6EFE4),
+                color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
         }
@@ -220,45 +249,43 @@ private fun ConnectedSurface(
     state: MainUiState,
     viewModel: MainViewModel,
     onPathClick: (String) -> Unit,
+    onAddPhoto: () -> Unit,
+    onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier) {
         val wideLayout = maxWidth >= 980.dp
         if (wideLayout) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                TopBar(
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                SidebarPanel(
                     state = state,
-                    onOpenDrawer = null,
-                    onNewSession = viewModel::newSession,
-                    onRefresh = viewModel::refreshThreads,
-                    onToggleSettings = { viewModel.toggleSettings(true) },
-                )
-                Row(
+                    viewModel = viewModel,
+                    onThreadSelected = viewModel::selectSession,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 18.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    SidebarPanel(
-                        state = state,
-                        viewModel = viewModel,
-                        modifier = Modifier
-                            .width(340.dp)
-                            .fillMaxHeight(),
-                    )
-                    ChatStage(
-                        state = state,
-                        viewModel = viewModel,
-                        onPathClick = onPathClick,
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(1f),
-                    )
-                }
+                        .width(318.dp)
+                        .fillMaxHeight(),
+                )
+                ChatStage(
+                    state = state,
+                    viewModel = viewModel,
+                    onPathClick = onPathClick,
+                    onAddPhoto = onAddPhoto,
+                    onOpenDrawer = null,
+                    onOpenAgentSheet = onOpenAgentSheet,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .weight(1f),
+                )
             }
         } else {
             val drawerState = rememberDrawerState(DrawerValue.Closed)
             val scope = rememberCoroutineScope()
+
             ModalNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = {
@@ -269,48 +296,47 @@ private fun ConnectedSurface(
                         SidebarPanel(
                             state = state,
                             viewModel = viewModel,
+                            onThreadSelected = { sessionId ->
+                                scope.launch {
+                                    drawerState.close()
+                                }
+                                viewModel.selectSession(sessionId)
+                            },
                             modifier = Modifier
                                 .fillMaxHeight()
-                                .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 12.dp),
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
                         )
                     }
                 },
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    TopBar(
-                        state = state,
-                        onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onNewSession = viewModel::newSession,
-                        onRefresh = viewModel::refreshThreads,
-                        onToggleSettings = { viewModel.toggleSettings(true) },
-                    )
-                    ChatStage(
-                        state = state,
-                        viewModel = viewModel,
-                        onPathClick = onPathClick,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
-                    )
-                }
+                ChatStage(
+                    state = state,
+                    viewModel = viewModel,
+                    onPathClick = onPathClick,
+                    onAddPhoto = onAddPhoto,
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenAgentSheet = onOpenAgentSheet,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun TopBar(
-    state: MainUiState,
+private fun TopOverlayBar(
     onOpenDrawer: (() -> Unit)?,
-    onNewSession: () -> Unit,
-    onRefresh: () -> Unit,
-    onToggleSettings: () -> Unit,
+    onOpenAgentSheet: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 3.dp,
-        shadowElevation = 10.dp,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
+        shape = RoundedCornerShape(30.dp),
+        color = Color(0xD3141C27),
+        shadowElevation = 20.dp,
+        border = BorderStroke(1.dp, Color(0x26FFFFFF)),
     ) {
         Row(
             modifier = Modifier
@@ -321,33 +347,27 @@ private fun TopBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onOpenDrawer != null) {
-                FilledIconButton(onClick = onOpenDrawer) {
-                    Icon(Icons.Rounded.Menu, contentDescription = "Threads")
+                FilledIconButton(
+                    onClick = onOpenDrawer,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color(0xCC1E2A38),
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Icon(Icons.Rounded.Menu, contentDescription = "Открыть меню")
                 }
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "RuClaw Android",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    text = state.activeThread?.title?.ifBlank { "Новый диалог" } ?: "Launcher chat",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            ConnectionChip(status = state.connectionState.status)
-            IconButton(onClick = onNewSession) {
-                Icon(Icons.Rounded.Add, contentDescription = "New session")
-            }
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh")
-            }
-            IconButton(onClick = onToggleSettings) {
-                Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            FilledIconButton(
+                onClick = onOpenAgentSheet,
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = Color(0xFF72D8C4),
+                    contentColor = Color(0xFF091B18),
+                ),
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "Открыть действия")
             }
         }
     }
@@ -357,142 +377,76 @@ private fun TopBar(
 private fun SidebarPanel(
     state: MainUiState,
     viewModel: MainViewModel,
+    onThreadSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.93f),
+            containerColor = Color(0xD9141C27),
         ),
+        border = BorderStroke(1.dp, Color(0x1FFFFFFF)),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            ConnectionOverview(state = state, viewModel = viewModel)
-            HorizontalDivider()
-            Row(
+            FilledTonalButton(
+                onClick = { viewModel.toggleSettings(true) },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                shape = RoundedCornerShape(22.dp),
             ) {
-                Text(
-                    text = "Треды",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                FilledTonalButton(onClick = viewModel::newSession) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Новый")
-                }
+                Icon(Icons.Rounded.Settings, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Настройки")
             }
+
+            Text(
+                text = "Треды",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
 
             if (state.threads.isEmpty()) {
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
                     shape = RoundedCornerShape(22.dp),
+                    color = Color(0xAA1E2937),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = "Пока пусто",
+                            text = "Диалогов пока нет",
+                            color = Color.White,
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "Создай новый диалог или подключись к launcher, чтобы подтянуть историю.",
+                            text = "Нажми + в шапке или подключись к launcher, чтобы подтянуть историю.",
+                            color = Color(0xFFB8C4D2),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
+                Spacer(modifier = Modifier.weight(1f))
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.threads, key = { it.sessionId }) { thread ->
                         ThreadRow(
                             thread = thread,
                             isSelected = thread.sessionId == state.activeSessionId,
-                            onClick = { viewModel.selectSession(thread.sessionId) },
+                            onClick = { onThreadSelected(thread.sessionId) },
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConnectionOverview(
-    state: MainUiState,
-    viewModel: MainViewModel,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    shape = CircleShape,
-                    modifier = Modifier.size(42.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.Cable,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                Column {
-                    Text(
-                        text = "Launcher",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = state.launcherConfig.url.ifBlank { "URL не задан" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            Text(
-                text = statusText(state.connectionState.status),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            state.connectionState.message?.takeIf { it.isNotBlank() }?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ElevatedButton(onClick = viewModel::connectLauncher) {
-                    Text("Подключить")
-                }
-                OutlinedButton(onClick = viewModel::disconnectLauncher) {
-                    Text("Отключить")
                 }
             }
         }
@@ -505,46 +459,32 @@ private fun ThreadRow(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(22.dp)
     Surface(
-        shape = shape,
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.76f)
-        },
+        shape = RoundedCornerShape(22.dp),
+        color = if (isSelected) Color(0x334FAE9D) else Color(0xAA1D2938),
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 1.dp,
+            color = if (isSelected) Color(0xFF72D8C4) else Color(0x18FFFFFF),
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = thread.title.ifBlank { "Новый диалог" },
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (thread.isLocalOnly) {
-                    AssistChip(
-                        onClick = { },
-                        enabled = false,
-                        label = { Text("local") },
-                    )
-                }
-            }
+            Text(
+                text = thread.title.ifBlank { "Новый диалог" },
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 text = thread.preview.ifBlank { "Ещё без сообщений" },
+                color = Color(0xFFB8C4D2),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -557,9 +497,14 @@ private fun ChatStage(
     state: MainUiState,
     viewModel: MainViewModel,
     onPathClick: (String) -> Unit,
+    onAddPhoto: () -> Unit,
+    onOpenDrawer: (() -> Unit)?,
+    onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val topPadding = 112.dp
+    val bottomPadding = 186.dp
 
     LaunchedEffect(state.activeSessionId, state.messages.size, state.isTyping) {
         val extra = if (state.isTyping) 1 else 0
@@ -569,77 +514,130 @@ private fun ChatStage(
         }
     }
 
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-        ),
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(36.dp))
+            .background(Color(0x09000000)),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+        if (state.messages.isNotEmpty() || state.isHistoryLoading) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = topPadding,
+                    bottom = bottomPadding,
+                ),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (state.messages.isEmpty() && !state.isHistoryLoading) {
-                    EmptyStage(viewModel = viewModel, modifier = Modifier.fillMaxSize())
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(state.messages, key = { it.id }) { message ->
-                            MessageBubble(
-                                message = message,
-                                onPathClick = onPathClick,
-                                onExternalLink = viewModel::openExternalUrl,
-                            )
-                        }
-                        if (state.isTyping) {
-                            item(key = "typing") {
-                                TypingBubble()
-                            }
-                        }
-                    }
+                items(state.messages, key = { it.id }) { message ->
+                    MessageBubble(
+                        message = message,
+                        onPathClick = onPathClick,
+                        onExternalLink = viewModel::openExternalUrl,
+                    )
                 }
-
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = state.isHistoryLoading,
-                    modifier = Modifier.align(Alignment.Center),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Text("Подгружаю историю…")
-                        }
+                if (state.isTyping) {
+                    item(key = "typing") {
+                        TypingBubble()
                     }
                 }
             }
-
-            ComposerDock(
-                state = state,
-                onValueChange = viewModel::onComposerChanged,
-                onSend = viewModel::sendMessage,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .imePadding()
-                    .navigationBarsPadding(),
-            )
         }
+
+        AnimatedVisibility(
+            visible = state.isHistoryLoading,
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xD91A2531),
+                border = BorderStroke(1.dp, Color(0x1FFFFFFF)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF72D8C4),
+                    )
+                    Text(
+                        text = "Подгружаю историю…",
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+
+        OverlayFade(
+            top = true,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+        OverlayFade(
+            top = false,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+        )
+
+        TopOverlayBar(
+            onOpenDrawer = onOpenDrawer,
+            onOpenAgentSheet = onOpenAgentSheet,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        )
+
+        ComposerDock(
+            state = state,
+            onValueChange = viewModel::onComposerChanged,
+            onRemoveAttachment = viewModel::removeComposerAttachment,
+            onAddPhoto = onAddPhoto,
+            onSend = viewModel::sendMessage,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+        )
     }
+}
+
+@Composable
+private fun OverlayFade(
+    top: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(if (top) 188.dp else 220.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = if (top) {
+                        listOf(
+                            Color(0xF20B1017),
+                            Color(0xCC0B1017),
+                            Color(0x7A0B1017),
+                            Color.Transparent,
+                        )
+                    } else {
+                        listOf(
+                            Color.Transparent,
+                            Color(0x5A0B1017),
+                            Color(0xC20B1017),
+                            Color(0xF20B1017),
+                        )
+                    },
+                ),
+            ),
+    )
 }
 
 @Composable
@@ -657,53 +655,159 @@ private fun MessageBubble(
             shape = RoundedCornerShape(
                 topStart = 24.dp,
                 topEnd = 24.dp,
-                bottomEnd = if (isUser) 8.dp else 24.dp,
-                bottomStart = if (isUser) 24.dp else 8.dp,
+                bottomEnd = if (isUser) 10.dp else 24.dp,
+                bottomStart = if (isUser) 24.dp else 10.dp,
             ),
-            color = if (isUser) {
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
-            },
-            modifier = Modifier.widthIn(max = 720.dp),
+            color = if (isUser) Color(0xFF213042) else Color(0xD9182230),
+            border = BorderStroke(1.dp, if (isUser) Color(0x1FFFFFFF) else Color(0x18FFFFFF)),
+            modifier = Modifier.widthIn(max = 760.dp),
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (isUser) {
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                } else {
-                    MarkdownMessage(
-                        text = message.text,
-                        onDownloadLinkClick = onPathClick,
-                        onExternalLinkClick = onExternalLink,
-                    )
+                if (message.text.isNotBlank()) {
+                    if (isUser) {
+                        Text(
+                            text = message.text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White,
+                        )
+                    } else {
+                        MarkdownMessage(
+                            text = message.text,
+                            onDownloadLinkClick = onPathClick,
+                            onExternalLinkClick = onExternalLink,
+                        )
+                    }
                 }
 
                 if (message.attachments.isNotEmpty()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        message.attachments.take(3).forEach { attachment ->
-                            AssistChip(
-                                onClick = { onPathClick(attachment) },
-                                label = {
-                                    Text(
-                                        text = attachment.takeLast(32),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                            )
-                        }
-                    }
+                    AttachmentGallery(
+                        attachments = message.attachments,
+                        onPathClick = onPathClick,
+                    )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun AttachmentGallery(
+    attachments: List<String>,
+    onPathClick: (String) -> Unit,
+) {
+    val imageAttachments = attachments.filter { it.startsWith("data:image/") }
+    val otherAttachments = attachments.filterNot { it.startsWith("data:image/") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (imageAttachments.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                imageAttachments.take(3).forEach { dataUrl ->
+                    DataImageTile(
+                        dataUrl = dataUrl,
+                        modifier = Modifier.size(96.dp),
+                    )
+                }
+            }
+        }
+
+        if (otherAttachments.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                otherAttachments.take(3).forEach { attachment ->
+                    AssistChip(
+                        onClick = { onPathClick(attachment) },
+                        label = {
+                            Text(
+                                text = attachment.takeLast(28),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DataImageTile(
+    dataUrl: String,
+    modifier: Modifier = Modifier,
+    onRemove: (() -> Unit)? = null,
+) {
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        key1 = dataUrl,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            decodeDataImage(dataUrl)
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF1E2937))
+            .border(BorderStroke(1.dp, Color(0x1FFFFFFF)), RoundedCornerShape(18.dp)),
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Link,
+                    contentDescription = null,
+                    tint = Color.White,
+                )
+            }
+        }
+
+        if (onRemove != null) {
+            FilledIconButton(
+                onClick = onRemove,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(28.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = Color(0xD90B1017),
+                    contentColor = Color.White,
+                ),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Удалить фото",
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+private fun decodeDataImage(dataUrl: String) = runCatching {
+    if (!dataUrl.startsWith("data:image/")) {
+        null
+    } else {
+        val base64Part = dataUrl.substringAfter("base64,", "")
+        if (base64Part.isBlank()) {
+            null
+        } else {
+            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }
+    }
+}.getOrNull()
 
 @Composable
 private fun TypingBubble() {
@@ -733,7 +837,8 @@ private fun TypingBubble() {
     ) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f),
+            color = Color(0xD9182230),
+            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -746,7 +851,7 @@ private fun TypingBubble() {
                 Text(
                     text = "Печатает…",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color(0xFFB8C4D2),
                 )
             }
         }
@@ -759,7 +864,7 @@ private fun Dot(alpha: Float) {
         modifier = Modifier
             .size(8.dp)
             .alpha(alpha)
-            .background(MaterialTheme.colorScheme.primary, CircleShape),
+            .background(Color(0xFF72D8C4), CircleShape),
     )
 }
 
@@ -767,73 +872,150 @@ private fun Dot(alpha: Float) {
 private fun ComposerDock(
     state: MainUiState,
     onValueChange: (String) -> Unit,
+    onRemoveAttachment: (Int) -> Unit,
+    onAddPhoto: () -> Unit,
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f),
-        tonalElevation = 3.dp,
+        shape = RoundedCornerShape(32.dp),
+        color = Color(0xD9141C27),
+        shadowElevation = 20.dp,
+        border = BorderStroke(1.dp, Color(0x22FFFFFF)),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Bottom,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            OutlinedTextField(
-                value = state.composer.text,
-                onValueChange = onValueChange,
-                modifier = Modifier.weight(1f),
-                minLines = 1,
-                maxLines = 6,
-                label = { Text("Напиши задачу для RuClaw") },
-                placeholder = { Text("Например: переведи этот экран на русский и собери APK") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
-            )
-            FilledIconButton(
-                onClick = onSend,
-                enabled = state.composer.text.isNotBlank(),
-                modifier = Modifier.size(56.dp),
+            if (state.composer.attachments.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.composer.attachments.mapIndexed { index, attachment ->
+                        ComposerAttachmentPreview(
+                            attachment = attachment,
+                            onRemove = { onRemoveAttachment(index) },
+                        )
+                    }
+                }
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Icon(
-                    imageVector = if (state.composer.isSending) Icons.Rounded.Stop else Icons.Rounded.Send,
-                    contentDescription = "Send",
+                FilledIconButton(
+                    onClick = onAddPhoto,
+                    enabled = !state.composer.isSending,
+                    modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color(0xCC1E2A38),
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = "Добавить фото",
+                    )
+                }
+
+                OutlinedTextField(
+                    value = state.composer.text,
+                    onValueChange = onValueChange,
+                    modifier = Modifier.weight(1f),
+                    enabled = !state.composer.isSending,
+                    minLines = 1,
+                    maxLines = 6,
+                    placeholder = {
+                        Text("Напишите задачу")
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        if (!state.composer.isSending) {
+                            onSend()
+                        }
+                    }),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = composerFieldColors(),
                 )
+
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = !state.composer.isSending &&
+                        (state.composer.text.isNotBlank() || state.composer.attachments.isNotEmpty()),
+                    modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color(0xFF72D8C4),
+                        contentColor = Color(0xFF091B18),
+                        disabledContainerColor = Color(0x553B4C5F),
+                        disabledContentColor = Color(0x99C9D0D7),
+                    ),
+                ) {
+                    if (state.composer.isSending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Color(0xFF091B18),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Send,
+                            contentDescription = "Отправить",
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
+private fun ComposerAttachmentPreview(
+    attachment: ComposerAttachment,
+    onRemove: () -> Unit,
+) {
+    DataImageTile(
+        dataUrl = attachment.url,
+        modifier = Modifier.size(76.dp),
+        onRemove = onRemove,
+    )
+}
+
+@Composable
 private fun EmptyStage(
+    state: MainUiState,
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
 ) {
     val prompts = listOf(
         "Сделай Android-интерфейс под launcher",
-        "Переведи этот проект на русский целиком",
-        "Собери APK в GitHub Actions",
+        "Покажи где ломается API и как исправить",
+        "Подготовь новый релиз APK",
     )
+
     Column(
-        modifier = modifier.padding(horizontal = 20.dp),
+        modifier = modifier
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Пустой тред",
+            text = "Готов к задаче",
             style = MaterialTheme.typography.headlineSmall,
+            color = Color.White,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = "Задай первую задачу или начни с готового промпта.",
+            text = if (state.hasConfiguredLauncher) {
+                "Выбери тред слева или начни новый диалог."
+            } else {
+                "Открой настройки, укажи launcher URL и access token, потом можно писать прямо сюда."
+            },
             style = MaterialTheme.typography.bodyLarge,
+            color = Color(0xFFB8C4D2),
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(22.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             prompts.forEach { prompt ->
                 AssistChip(
@@ -846,104 +1028,13 @@ private fun EmptyStage(
                         )
                     },
                     leadingIcon = {
-                        Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.Link,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
                     },
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun WelcomeGate(
-    state: MainUiState,
-    viewModel: MainViewModel,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 22.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = "RuClaw Android",
-                style = MaterialTheme.typography.headlineLarge,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = "Нативный GPT-style клиент к твоему launcher по локальной сети.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.84f),
-                textAlign = TextAlign.Center,
-            )
-        }
-
-        Spacer(modifier = Modifier.height(22.dp))
-
-        Card(
-            shape = RoundedCornerShape(34.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 560.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(
-                    text = "Подключение",
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text(
-                    text = "По умолчанию выставлен LAN launcher. Токен не храню в коде, его вводишь тут.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = state.launcherConfig.url,
-                    onValueChange = viewModel::onLauncherUrlChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Launcher URL") },
-                    placeholder = { Text("http://192.168.1.109:18800") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = state.launcherConfig.token,
-                    onValueChange = viewModel::onLauncherTokenChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Launcher access token") },
-                    placeholder = { Text("Вставь access token") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ElevatedButton(onClick = viewModel::connectLauncher) {
-                        Text("Подключиться")
-                    }
-                    ConnectionChip(status = state.connectionState.status)
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FeatureChip(label = "WS streaming")
-                    FeatureChip(label = "История сессий")
-                    FeatureChip(label = "Markdown + code")
-                }
             }
         }
     }
@@ -958,7 +1049,7 @@ private fun SettingsSheet(
     ModalBottomSheet(
         onDismissRequest = { viewModel.toggleSettings(false) },
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color(0xFF111823),
     ) {
         Column(
             modifier = Modifier
@@ -971,14 +1062,19 @@ private fun SettingsSheet(
             Text(
                 text = "Настройки launcher",
                 style = MaterialTheme.typography.titleLarge,
+                color = Color.White,
             )
+
             OutlinedTextField(
                 value = state.launcherConfig.url,
                 onValueChange = viewModel::onLauncherUrlChanged,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Launcher URL") },
+                placeholder = { Text("http://192.168.1.109:18800") },
                 singleLine = true,
+                colors = sheetFieldColors(),
             )
+
             OutlinedTextField(
                 value = state.launcherConfig.token,
                 onValueChange = viewModel::onLauncherTokenChanged,
@@ -986,21 +1082,21 @@ private fun SettingsSheet(
                 label = { Text("Launcher access token") },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
+                colors = sheetFieldColors(),
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ElevatedButton(onClick = viewModel::connectLauncher) {
-                    Text("Применить")
-                }
-                OutlinedButton(onClick = viewModel::disconnectLauncher) {
-                    Text("Отключить")
-                }
-                TextButton(onClick = { viewModel.toggleSettings(false) }) {
-                    Text("Закрыть")
-                }
+            FilledTonalButton(
+                onClick = {
+                    viewModel.toggleSettings(false)
+                    viewModel.connectLauncher()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+            ) {
+                Text("Подключить")
             }
 
-            HorizontalDivider()
+            HorizontalDivider(color = Color(0x1FFFFFFF))
 
             UpdateSection(
                 updateState = state.updateState,
@@ -1014,31 +1110,6 @@ private fun SettingsSheet(
                 },
             )
 
-            if (state.diagnostics.isNotEmpty()) {
-                HorizontalDivider()
-                Text(
-                    text = "Диагностика",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        state.diagnostics.takeLast(8).forEach { line ->
-                            Text(
-                                text = line,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
             Spacer(modifier = Modifier.height(12.dp))
         }
     }
@@ -1056,10 +1127,12 @@ private fun UpdateSection(
         Text(
             text = "Обновления",
             style = MaterialTheme.typography.titleMedium,
+            color = Color.White,
         )
         Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xCC182231),
+            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
@@ -1067,40 +1140,42 @@ private fun UpdateSection(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Текущая версия: ${updateState.currentVersionName.ifBlank { "dev" }}",
+                    text = "Текущая версия: " + updateState.currentVersionName.ifBlank { "dev" },
                     style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White,
                 )
                 Text(
                     text = if (updateState.latestVersionName.isBlank()) {
                         "Latest release ещё не запрашивался"
                     } else {
-                        "Latest release: ${updateState.latestVersionName}"
+                        "Latest release: " + updateState.latestVersionName
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color(0xFFB8C4D2),
                 )
                 Text(
                     text = updateStatusText(updateState),
                     style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
                 )
                 updateState.releaseNotes.takeIf { it.isNotBlank() }?.let { notes ->
                     Text(
                         text = notes.take(240),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color(0xFFB8C4D2),
                         maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ElevatedButton(
+                    FilledTonalButton(
                         onClick = onCheckUpdates,
                         enabled = !updateState.isChecking,
                     ) {
                         Text(if (updateState.isChecking) "Проверяю…" else "Проверить")
                     }
                     if (updateState.isUpdateAvailable && updateState.downloadState != UpdateDownloadState.READY_TO_INSTALL) {
-                        OutlinedButton(onClick = onDownloadUpdate) {
+                        FilledTonalButton(onClick = onDownloadUpdate) {
                             Text("Скачать APK")
                         }
                     }
@@ -1124,7 +1199,7 @@ private fun updateStatusText(updateState: UpdateUiState): String {
     return when {
         updateState.isChecking -> "Смотрю latest release на GitHub…"
         updateState.downloadState == UpdateDownloadState.DOWNLOADING && updateState.downloadProgressPercent != null ->
-            "APK качается: ${updateState.downloadProgressPercent}%"
+            "APK качается: " + updateState.downloadProgressPercent + "%"
         updateState.downloadState == UpdateDownloadState.DOWNLOADING ->
             "APK качается через DownloadManager."
         updateState.downloadState == UpdateDownloadState.READY_TO_INSTALL && updateState.canInstallPackages ->
@@ -1134,7 +1209,7 @@ private fun updateStatusText(updateState: UpdateUiState): String {
         updateState.downloadState == UpdateDownloadState.FAILED ->
             "Предыдущая загрузка сорвалась. Запусти скачивание заново."
         updateState.isUpdateAvailable ->
-            "Есть свежая версия ${updateState.latestVersionName}."
+            "Есть свежая версия " + updateState.latestVersionName + "."
         updateState.latestVersionName.isNotBlank() ->
             "У тебя уже актуальная версия."
         else -> "Пока не проверял релизный канал."
@@ -1164,13 +1239,15 @@ private fun ConnectionChip(status: ConnectionStatus) {
     }
 }
 
-@Composable
-private fun FeatureChip(label: String) {
-    AssistChip(
-        onClick = { },
-        enabled = false,
-        label = { Text(label) },
-    )
+private fun statusText(status: ConnectionStatus): String {
+    return when (status) {
+        ConnectionStatus.CONNECTED -> "онлайн"
+        ConnectionStatus.CONNECTING -> "подключение"
+        ConnectionStatus.RECONNECTING -> "переподключение"
+        ConnectionStatus.FAILED_AUTH -> "ошибка токена"
+        ConnectionStatus.FAILED_NETWORK -> "ошибка сети"
+        ConnectionStatus.DISCONNECTED -> "оффлайн"
+    }
 }
 
 @Composable
@@ -1208,31 +1285,31 @@ private fun AnimatedBackdrop(modifier: Modifier = Modifier) {
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color(0xFF11151C),
-                    Color(0xFF0E1117),
-                    Color(0xFF161B22),
+                    Color(0xFF05080D),
+                    Color(0xFF09111A),
+                    Color(0xFF0F1824),
                 ),
             ),
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0x336DD3BF), Color.Transparent),
+                colors = listOf(Color(0x446DD3BF), Color.Transparent),
             ),
             radius = size.minDimension * 0.36f,
             center = Offset(size.width * orbA, size.height * 0.18f),
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0x33FF9C63), Color.Transparent),
+                colors = listOf(Color(0x35FF9C63), Color.Transparent),
             ),
-            radius = size.minDimension * 0.42f,
-            center = Offset(size.width * orbB, size.height * 0.72f),
+            radius = size.minDimension * 0.44f,
+            center = Offset(size.width * orbB, size.height * 0.74f),
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0x22F7EAD5), Color.Transparent),
+                colors = listOf(Color(0x1EF7EAD5), Color.Transparent),
             ),
-            radius = size.minDimension * 0.24f,
+            radius = size.minDimension * 0.25f,
             center = Offset(size.width * 0.5f, size.height * orbC),
         )
     }
@@ -1246,7 +1323,7 @@ private fun StageScrims() {
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0x1AF6EFE4),
+                        Color(0x10000000),
                         Color.Transparent,
                         Color(0x12000000),
                     ),
@@ -1255,13 +1332,36 @@ private fun StageScrims() {
     )
 }
 
-private fun statusText(status: ConnectionStatus): String {
-    return when (status) {
-        ConnectionStatus.CONNECTED -> "онлайн"
-        ConnectionStatus.CONNECTING -> "подключение"
-        ConnectionStatus.RECONNECTING -> "переподключение"
-        ConnectionStatus.FAILED_AUTH -> "ошибка токена"
-        ConnectionStatus.FAILED_NETWORK -> "ошибка сети"
-        ConnectionStatus.DISCONNECTED -> "оффлайн"
-    }
-}
+@Composable
+private fun composerFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    disabledTextColor = Color(0xFFB8C4D2),
+    cursorColor = Color(0xFF72D8C4),
+    focusedBorderColor = Color(0xFF72D8C4),
+    unfocusedBorderColor = Color(0x33FFFFFF),
+    disabledBorderColor = Color(0x14FFFFFF),
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+    disabledContainerColor = Color.Transparent,
+    focusedPlaceholderColor = Color(0x88FFFFFF),
+    unfocusedPlaceholderColor = Color(0x66FFFFFF),
+    disabledPlaceholderColor = Color(0x44FFFFFF),
+)
+
+@Composable
+private fun sheetFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    disabledTextColor = Color(0xFFB8C4D2),
+    cursorColor = Color(0xFF72D8C4),
+    focusedBorderColor = Color(0xFF72D8C4),
+    unfocusedBorderColor = Color(0x33FFFFFF),
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
+    disabledContainerColor = Color.Transparent,
+    focusedLabelColor = Color(0xFF72D8C4),
+    unfocusedLabelColor = Color(0xFFB8C4D2),
+    focusedPlaceholderColor = Color(0x88FFFFFF),
+    unfocusedPlaceholderColor = Color(0x66FFFFFF),
+)

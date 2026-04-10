@@ -4,8 +4,14 @@ import com.perdonus.ruclaw.android.core.model.CachedSession
 import com.perdonus.ruclaw.android.core.model.ChatMessage
 import com.perdonus.ruclaw.android.core.model.ChatRole
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
+import com.perdonus.ruclaw.android.core.model.LauncherModelItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
+import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
+import com.perdonus.ruclaw.android.core.model.LauncherToolItem
 import com.perdonus.ruclaw.android.core.model.MessageStatus
 import java.io.IOException
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +29,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -33,6 +40,8 @@ import okhttp3.WebSocketListener
 class RuClawLauncherClient(
     private val httpClient: OkHttpClient,
 ) {
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
@@ -123,6 +132,182 @@ class RuClawLauncherClient(
         )
     }
 
+    suspend fun listModels(
+        baseUrl: String,
+        launcherToken: String,
+    ): List<LauncherModelItem> {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val response = requestJson<RemoteModelsResponse>(
+            requestBuilder(normalizedBaseUrl, "/api/models", launcherToken)
+                .get()
+                .build(),
+        )
+        return response.models
+            .sortedWith(
+                compareByDescending<RemoteModelItem> { it.isDefault }
+                    .thenByDescending { it.available }
+                    .thenBy { it.modelName.lowercase() },
+            )
+            .map { dto ->
+                LauncherModelItem(
+                    index = dto.index,
+                    modelName = dto.modelName,
+                    status = dto.status,
+                    available = dto.available,
+                    isDefault = dto.isDefault,
+                    isVirtual = dto.isVirtual,
+                    authMethod = dto.authMethod,
+                )
+            }
+    }
+
+    suspend fun setDefaultModel(
+        baseUrl: String,
+        launcherToken: String,
+        modelName: String,
+    ) {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        requestText(
+            requestBuilder(normalizedBaseUrl, "/api/models/default", launcherToken)
+                .post(("{\"model_name\":" + jsonQuote(modelName) + "}").toRequestBody(jsonMediaType))
+                .build(),
+        )
+    }
+
+    suspend fun listSkills(
+        baseUrl: String,
+        launcherToken: String,
+    ): List<LauncherSkillItem> {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val response = requestJson<RemoteSkillsResponse>(
+            requestBuilder(normalizedBaseUrl, "/api/skills", launcherToken)
+                .get()
+                .build(),
+        )
+        return response.skills
+            .sortedBy { it.name.lowercase() }
+            .map { dto ->
+                LauncherSkillItem(
+                    name = dto.name,
+                    description = dto.description,
+                    source = dto.source,
+                    originKind = dto.originKind,
+                    registryName = dto.registryName,
+                    registryUrl = dto.registryUrl,
+                    installedVersion = dto.installedVersion,
+                )
+            }
+    }
+
+    suspend fun searchSkills(
+        baseUrl: String,
+        launcherToken: String,
+        query: String,
+        limit: Int = 8,
+        offset: Int = 0,
+    ): List<LauncherSkillSearchItem> {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val encodedQuery = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8.toString())
+        val response = requestJson<RemoteSkillSearchResponse>(
+            requestBuilder(
+                normalizedBaseUrl,
+                "/api/skills/search?q=$encodedQuery&limit=$limit&offset=$offset",
+                launcherToken,
+            )
+                .get()
+                .build(),
+        )
+        return response.results.map { dto ->
+            LauncherSkillSearchItem(
+                slug = dto.slug,
+                displayName = dto.displayName,
+                summary = dto.summary,
+                version = dto.version,
+                registryName = dto.registryName,
+                url = dto.url,
+                installed = dto.installed,
+                installedName = dto.installedName,
+            )
+        }
+    }
+
+    suspend fun installSkill(
+        baseUrl: String,
+        launcherToken: String,
+        slug: String,
+        registryName: String,
+        version: String = "",
+    ): LauncherSkillItem? {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val body = buildString {
+            append("{\"slug\":")
+            append(jsonQuote(slug))
+            append(",\"registry\":")
+            append(jsonQuote(registryName))
+            if (version.isNotBlank()) {
+                append(",\"version\":")
+                append(jsonQuote(version))
+            }
+            append("}")
+        }
+        val response = requestJson<RemoteInstallSkillResponse>(
+            requestBuilder(normalizedBaseUrl, "/api/skills/install", launcherToken)
+                .post(body.toRequestBody(jsonMediaType))
+                .build(),
+        )
+        val skill = response.skill ?: return null
+        return LauncherSkillItem(
+            name = skill.name,
+            description = skill.description,
+            source = skill.source,
+            originKind = skill.originKind,
+            registryName = skill.registryName,
+            registryUrl = skill.registryUrl,
+            installedVersion = skill.installedVersion,
+        )
+    }
+
+    suspend fun listTools(
+        baseUrl: String,
+        launcherToken: String,
+    ): List<LauncherToolItem> {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val response = requestJson<RemoteToolsResponse>(
+            requestBuilder(normalizedBaseUrl, "/api/tools", launcherToken)
+                .get()
+                .build(),
+        )
+        return response.tools
+            .sortedWith(compareBy<RemoteToolItem> { it.category }.thenBy { it.name })
+            .map { dto ->
+                LauncherToolItem(
+                    name = dto.name,
+                    description = dto.description,
+                    category = dto.category,
+                    status = dto.status,
+                    reasonCode = dto.reasonCode,
+                )
+            }
+    }
+
+    suspend fun setToolEnabled(
+        baseUrl: String,
+        launcherToken: String,
+        name: String,
+        enabled: Boolean,
+    ) {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        requestText(
+            requestBuilder(
+                normalizedBaseUrl,
+                "/api/tools/" + URLEncoder.encode(name, StandardCharsets.UTF_8.toString()) + "/state",
+                launcherToken,
+            )
+                .put(("{\"enabled\":" + enabled + "}").toRequestBody(jsonMediaType))
+                .build(),
+        )
+    }
+
     fun openSocket(
         baseUrl: String,
         launcherToken: String,
@@ -163,6 +348,23 @@ class RuClawLauncherClient(
         return Request.Builder()
             .url(baseUrl + path)
             .header("Authorization", "Bearer ${launcherToken.trim()}")
+    }
+
+    private fun jsonQuote(value: String): String {
+        return buildString(value.length + 8) {
+            append('"')
+            value.forEach { char ->
+                when (char) {
+                    '\\' -> append("\\\\")
+                    '"' -> append("\\\"")
+                    '\n' -> append("\\n")
+                    '\r' -> append("\\r")
+                    '\t' -> append("\\t")
+                    else -> append(char)
+                }
+            }
+            append('"')
+        }
     }
 
     private fun toApiException(response: Response, body: String): RuClawApiException {
@@ -234,9 +436,17 @@ class PicoSocket(
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     socket = null
-                    val message = t.message ?: "WebSocket failure"
-                    failed.complete(t)
-                    _events.tryEmit(PicoEvent.SocketFailure(message))
+                    val failure = response?.let { upgradeResponse ->
+                        val body = runCatching { upgradeResponse.body?.string().orEmpty() }.getOrDefault("")
+                        toApiException(upgradeResponse, body)
+                    } ?: t
+                    failed.complete(failure)
+                    _events.tryEmit(
+                        PicoEvent.SocketFailure(
+                            reason = failure.message ?: "WebSocket failure",
+                            statusCode = (failure as? RuClawApiException)?.statusCode,
+                        ),
+                    )
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -392,6 +602,7 @@ sealed interface PicoEvent {
 
     data class SocketFailure(
         val reason: String,
+        val statusCode: Int? = null,
     ) : PicoEvent
 
     data object Pong : PicoEvent
@@ -428,4 +639,84 @@ private data class RemoteSessionMessage(
     val role: String = "",
     val content: String = "",
     val media: List<String> = emptyList(),
+)
+
+@Serializable
+private data class RemoteModelsResponse(
+    val models: List<RemoteModelItem> = emptyList(),
+)
+
+@Serializable
+private data class RemoteModelItem(
+    val index: Int = 0,
+    @SerialName("model_name")
+    val modelName: String = "",
+    val status: String = "",
+    val available: Boolean = false,
+    @SerialName("is_default")
+    val isDefault: Boolean = false,
+    @SerialName("is_virtual")
+    val isVirtual: Boolean = false,
+    @SerialName("auth_method")
+    val authMethod: String = "",
+)
+
+@Serializable
+private data class RemoteSkillsResponse(
+    val skills: List<RemoteSkillItem> = emptyList(),
+)
+
+@Serializable
+private data class RemoteSkillItem(
+    val name: String = "",
+    val description: String = "",
+    val source: String = "",
+    @SerialName("origin_kind")
+    val originKind: String = "",
+    @SerialName("registry_name")
+    val registryName: String = "",
+    @SerialName("registry_url")
+    val registryUrl: String = "",
+    @SerialName("installed_version")
+    val installedVersion: String = "",
+)
+
+@Serializable
+private data class RemoteSkillSearchResponse(
+    val results: List<RemoteSkillSearchItem> = emptyList(),
+)
+
+@Serializable
+private data class RemoteSkillSearchItem(
+    val slug: String = "",
+    @SerialName("display_name")
+    val displayName: String = "",
+    val summary: String = "",
+    val version: String = "",
+    @SerialName("registry_name")
+    val registryName: String = "",
+    val url: String = "",
+    val installed: Boolean = false,
+    @SerialName("installed_name")
+    val installedName: String = "",
+)
+
+@Serializable
+private data class RemoteInstallSkillResponse(
+    val skill: RemoteSkillItem? = null,
+)
+
+@Serializable
+private data class RemoteToolsResponse(
+    val tools: List<RemoteToolItem> = emptyList(),
+)
+
+@Serializable
+private data class RemoteToolItem(
+    val name: String = "",
+    val description: String = "",
+    val category: String = "",
+    val status: String = "",
+    @SerialName("reason_code")
+    val reasonCode: String = "",
 )
