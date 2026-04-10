@@ -2,6 +2,7 @@ package com.perdonus.ruclaw.android.data.localruntime
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import com.perdonus.ruclaw.android.BuildConfig
 import com.perdonus.ruclaw.android.core.util.AppDiagnostics
 import java.io.File
@@ -46,6 +47,7 @@ class LocalRuntimeManager(context: Context) {
     private var modelServerProcess: Process? = null
 
     suspend fun install(log: suspend (String) -> Unit): LocalRuntimeInstallation = withContext(Dispatchers.IO) {
+        ensureSupportedAndroidVersion()
         log("Готовлю sandbox для локального RuClaw…")
         runtimeRoot.mkdirs()
         binDir.mkdirs()
@@ -80,6 +82,7 @@ class LocalRuntimeManager(context: Context) {
     }
 
     suspend fun startLocalRuntime(config: LocalRuntimeConfig): LocalRuntimeConnection = withContext(Dispatchers.IO) {
+        ensureSupportedAndroidVersion()
         val ggufFile = config.ggufPath.trim().takeIf { it.isNotBlank() }?.let(::resolveGgufFile)
 
         val coreBinary = File(binDir, coreBinaryAssetName)
@@ -453,6 +456,14 @@ class LocalRuntimeManager(context: Context) {
         return value.replace(Regex("[^A-Za-z0-9._-]+"), "-").trim('-').ifBlank { "local-gguf" }
     }
 
+    private fun ensureSupportedAndroidVersion() {
+        if (Build.VERSION.SDK_INT < minimumLocalRuntimeSdk) {
+            throw IOException(
+                "Локальный RuClaw на устройстве требует Android 9 (API 28) или новее.",
+            )
+        }
+    }
+
     companion object {
         const val launcherUrl = "http://127.0.0.1:18800"
         const val launcherToken = "ruclaw-local"
@@ -463,6 +474,7 @@ class LocalRuntimeManager(context: Context) {
         private const val modelServerAssetName = "llama-server"
         private const val localModelName = "local-gguf"
         private const val localModelApiBase = "http://127.0.0.1:1234/v1"
+        private const val minimumLocalRuntimeSdk = 28
     }
 }
 

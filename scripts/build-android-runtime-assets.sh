@@ -12,8 +12,8 @@ runtime_dir="${out_root%/}/runtime"
 runtime_lib_dir="${runtime_dir}/lib"
 llama_cpp_repo="${LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 llama_cpp_ref="${LLAMA_CPP_REF:-b8749}"
-llama_android_platform="${LLAMA_CPP_ANDROID_PLATFORM:-android-26}"
-android_ndk="${ANDROID_NDK:-${ANDROID_NDK_ROOT:-${ANDROID_NDK_LATEST_HOME:-}}}"
+llama_android_platform="${LLAMA_CPP_ANDROID_PLATFORM:-android-28}"
+android_ndk="${ANDROID_NDK:-${ANDROID_NDK_ROOT:-}}"
 
 version="${VERSION:-$(git -C "${repo_root}" describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)}"
 git_commit="${GIT_COMMIT:-$(git -C "${repo_root}" rev-parse --short=8 HEAD 2>/dev/null || echo dev)}"
@@ -29,6 +29,9 @@ rm -rf "${runtime_lib_dir}"
 
 if [[ -z "${android_ndk}" && -n "${ANDROID_SDK_ROOT:-}" && -d "${ANDROID_SDK_ROOT}/ndk" ]]; then
   android_ndk="$(find "${ANDROID_SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+fi
+if [[ -z "${android_ndk}" && -n "${ANDROID_NDK_LATEST_HOME:-}" ]]; then
+  android_ndk="${ANDROID_NDK_LATEST_HOME}"
 fi
 if [[ -z "${android_ndk}" || ! -f "${android_ndk}/build/cmake/android.toolchain.cmake" ]]; then
   echo "Android NDK not found. Set ANDROID_NDK / ANDROID_NDK_ROOT / ANDROID_NDK_LATEST_HOME." >&2
