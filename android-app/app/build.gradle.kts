@@ -5,11 +5,24 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+val ciVersionCode = providers.gradleProperty("CI_VERSION_CODE").orNull?.toIntOrNull() ?: 1
+val ciVersionName = providers.gradleProperty("CI_VERSION_NAME").orNull ?: "0.1.$ciVersionCode"
+val updateRepoOwner = providers.gradleProperty("UPDATE_REPO_OWNER").orNull ?: "Perdonus"
+val updateRepoName = providers.gradleProperty("UPDATE_REPO_NAME").orNull ?: "ruclaw"
+val updateApkAssetName = providers.gradleProperty("UPDATE_APK_ASSET_NAME").orNull ?: "ruclaw-android-release.apk"
+val updateShaAssetName = providers.gradleProperty("UPDATE_SHA256_ASSET_NAME").orNull ?: "ruclaw-android-release.apk.sha256"
+val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+val releaseKeystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+val hasReleaseSigning = !releaseKeystorePath.isNullOrBlank() &&
+    !releaseKeystorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.perdonus.ruclaw.android"
     compileSdk = 36
-    val ciVersionCode = providers.gradleProperty("CI_VERSION_CODE").orNull?.toIntOrNull() ?: 1
-    val ciVersionName = providers.gradleProperty("CI_VERSION_NAME").orNull ?: "0.1.$ciVersionCode"
 
     defaultConfig {
         applicationId = "com.perdonus.ruclaw.android"
@@ -21,6 +34,21 @@ android {
         vectorDrawables.useSupportLibrary = true
 
         buildConfigField("String", "DEFAULT_LAUNCHER_URL", "\"http://192.168.1.109:18800\"")
+        buildConfigField("String", "UPDATE_REPO_OWNER", "\"$updateRepoOwner\"")
+        buildConfigField("String", "UPDATE_REPO_NAME", "\"$updateRepoName\"")
+        buildConfigField("String", "UPDATE_APK_ASSET_NAME", "\"$updateApkAssetName\"")
+        buildConfigField("String", "UPDATE_SHA256_ASSET_NAME", "\"$updateShaAssetName\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildFeatures {
@@ -28,13 +56,19 @@ android {
         buildConfig = true
     }
 
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            isShrinkResources = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlin {
-        jvmToolchain(17)
     }
 
     packaging {
@@ -44,6 +78,10 @@ android {
             excludes += "META-INF/NOTICE*"
         }
     }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {

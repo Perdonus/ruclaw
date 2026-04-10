@@ -20,8 +20,45 @@ data class MainUiState(
     val showSettings: Boolean = false,
     val bannerMessage: String? = null,
     val pendingExternalUrl: String? = null,
+    val pendingSystemAction: PendingSystemAction? = null,
+    val updateState: UpdateUiState = UpdateUiState(),
     val diagnostics: List<String> = emptyList(),
 )
+
+data class UpdateUiState(
+    val currentVersionName: String = "",
+    val latestVersionName: String = "",
+    val releaseTag: String = "",
+    val releaseUrl: String = "",
+    val releaseNotes: String = "",
+    val apkUrl: String = "",
+    val apkSha256Url: String = "",
+    val isChecking: Boolean = false,
+    val isUpdateAvailable: Boolean = false,
+    val canInstallPackages: Boolean = false,
+    val downloadId: Long? = null,
+    val downloadState: UpdateDownloadState = UpdateDownloadState.IDLE,
+    val downloadedUri: String = "",
+    val downloadProgressPercent: Int? = null,
+    val lastCheckedAtEpochMillis: Long = 0L,
+)
+
+enum class UpdateDownloadState {
+    IDLE,
+    DOWNLOADING,
+    READY_TO_INSTALL,
+    FAILED,
+}
+
+data class PendingSystemAction(
+    val type: PendingSystemActionType,
+    val uri: String? = null,
+)
+
+enum class PendingSystemActionType {
+    OPEN_UNKNOWN_SOURCES_SETTINGS,
+    INSTALL_APK,
+}
 
 val MainUiState.activeThread: ChatThreadSummary?
     get() = threads.firstOrNull { it.sessionId == activeSessionId }

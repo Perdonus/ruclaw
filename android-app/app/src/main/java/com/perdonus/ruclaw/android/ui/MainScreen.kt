@@ -4,6 +4,10 @@
 
 package com.perdonus.ruclaw.android.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -87,6 +91,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +113,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
 
     LaunchedEffect(state.bannerMessage) {
@@ -122,6 +128,28 @@ fun MainScreen(viewModel: MainViewModel) {
             runCatching { uriHandler.openUri(url) }
             viewModel.consumePendingExternalUrl()
         }
+    }
+
+    LaunchedEffect(state.pendingSystemAction) {
+        val action = state.pendingSystemAction ?: return@LaunchedEffect
+        val intent = when (action.type) {
+            PendingSystemActionType.OPEN_UNKNOWN_SOURCES_SETTINGS -> {
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            PendingSystemActionType.INSTALL_APK -> {
+                val targetUri = action.uri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.parse(targetUri), "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+        }
+        runCatching { context.startActivity(intent) }
+        viewModel.consumePendingSystemAction()
     }
 
     if (!state.isLoaded) {
@@ -974,6 +1002,20 @@ private fun SettingsSheet(
                 }
             }
 
+            HorizontalDivider()
+
+            UpdateSection(
+                updateState = state.updateState,
+                onCheckUpdates = { viewModel.checkForUpdates() },
+                onDownloadUpdate = viewModel::downloadUpdate,
+                onInstallUpdate = viewModel::installDownloadedUpdate,
+                onOpenRelease = {
+                    state.updateState.releaseUrl
+                        .takeIf { it.isNotBlank() }
+                        ?.let(viewModel::openExternalUrl)
+                },
+            )
+
             if (state.diagnostics.isNotEmpty()) {
                 HorizontalDivider()
                 Text(
@@ -1001,6 +1043,103 @@ private fun SettingsSheet(
             }
             Spacer(modifier = Modifier.height(12.dp))
         }
+    }
+}
+
+@Composable
+private fun UpdateSection(
+    updateState: UpdateUiState,
+    onCheckUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onOpenRelease: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Обновления",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Текущая версия: ${updateState.currentVersionName.ifBlank { "dev" }}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = if (updateState.latestVersionName.isBlank()) {
+                        "Latest release ещё не запрашивался"
+                    } else {
+                        "Latest release: ${updateState.latestVersionName}"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = updateStatusText(updateState),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                updateState.releaseNotes.takeIf { it.isNotBlank() }?.let { notes ->
+                    Text(
+                        text = notes.take(240),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ElevatedButton(
+                        onClick = onCheckUpdates,
+                        enabled = !updateState.isChecking,
+                    ) {
+                        Text(if (updateState.isChecking) "Проверяю…" else "Проверить")
+                    }
+                    if (updateState.isUpdateAvailable && updateState.downloadState != UpdateDownloadState.READY_TO_INSTALL) {
+                        OutlinedButton(onClick = onDownloadUpdate) {
+                            Text("Скачать APK")
+                        }
+                    }
+                    if (updateState.downloadState == UpdateDownloadState.READY_TO_INSTALL) {
+                        FilledTonalButton(onClick = onInstallUpdate) {
+                            Text("Установить")
+                        }
+                    }
+                    if (updateState.releaseUrl.isNotBlank()) {
+                        TextButton(onClick = onOpenRelease) {
+                            Text("Релиз")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun updateStatusText(updateState: UpdateUiState): String {
+    return when {
+        updateState.isChecking -> "Смотрю latest release на GitHub…"
+        updateState.downloadState == UpdateDownloadState.DOWNLOADING && updateState.downloadProgressPercent != null ->
+            "APK качается: ${updateState.downloadProgressPercent}%"
+        updateState.downloadState == UpdateDownloadState.DOWNLOADING ->
+            "APK качается через DownloadManager."
+        updateState.downloadState == UpdateDownloadState.READY_TO_INSTALL && updateState.canInstallPackages ->
+            "APK уже скачан. Можно ставить поверх текущей версии."
+        updateState.downloadState == UpdateDownloadState.READY_TO_INSTALL ->
+            "APK скачан. Разреши установку из этого источника и жми ещё раз."
+        updateState.downloadState == UpdateDownloadState.FAILED ->
+            "Предыдущая загрузка сорвалась. Запусти скачивание заново."
+        updateState.isUpdateAvailable ->
+            "Есть свежая версия ${updateState.latestVersionName}."
+        updateState.latestVersionName.isNotBlank() ->
+            "У тебя уже актуальная версия."
+        else -> "Пока не проверял релизный канал."
     }
 }
 

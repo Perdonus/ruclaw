@@ -9,6 +9,7 @@ data class PersistedAppState(
     val activeSessionId: String? = null,
     val threads: List<ChatThreadSummary> = emptyList(),
     val cachedSessions: List<CachedSession> = emptyList(),
+    val updateState: PersistedUpdateState = PersistedUpdateState(),
 )
 
 @Serializable
@@ -77,4 +78,27 @@ enum class ConnectionStatus {
     RECONNECTING,
     FAILED_AUTH,
     FAILED_NETWORK,
+}
+
+@Serializable
+data class PersistedUpdateState(
+    val latestVersionName: String = "",
+    val releaseTag: String = "",
+    val releaseUrl: String = "",
+    val releaseNotes: String = "",
+    val apkUrl: String = "",
+    val apkSha256Url: String = "",
+    val publishedAtEpochMillis: Long = 0L,
+    val lastCheckedAtEpochMillis: Long = 0L,
+    val downloadId: Long? = null,
+    val downloadedUri: String = "",
+    val downloadState: PersistedDownloadState = PersistedDownloadState.IDLE,
+)
+
+@Serializable
+enum class PersistedDownloadState {
+    IDLE,
+    DOWNLOADING,
+    READY_TO_INSTALL,
+    FAILED,
 }

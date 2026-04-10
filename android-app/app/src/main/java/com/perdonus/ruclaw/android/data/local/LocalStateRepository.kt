@@ -4,6 +4,7 @@ import android.content.Context
 import com.perdonus.ruclaw.android.core.model.CachedSession
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.PersistedAppState
+import com.perdonus.ruclaw.android.core.model.PersistedUpdateState
 import com.perdonus.ruclaw.android.core.util.JsonFileStore
 import kotlinx.coroutines.flow.StateFlow
 
@@ -67,6 +68,12 @@ class LocalStateRepository(context: Context) {
                 threads = upsertThreadList(current.threads, summary),
                 cachedSessions = upsertSessionList(current.cachedSessions, session),
             )
+        }
+    }
+
+    suspend fun updateUpdateState(transform: (PersistedUpdateState) -> PersistedUpdateState): PersistedAppState {
+        return store.update { current ->
+            current.copy(updateState = transform(current.updateState))
         }
     }
 

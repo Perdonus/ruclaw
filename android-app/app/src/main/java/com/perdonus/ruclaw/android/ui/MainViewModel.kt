@@ -15,6 +15,8 @@ import com.perdonus.ruclaw.android.core.model.ConnectionState
 import com.perdonus.ruclaw.android.core.model.ConnectionStatus
 import com.perdonus.ruclaw.android.core.model.LauncherConfigDraft
 import com.perdonus.ruclaw.android.core.model.MessageStatus
+import com.perdonus.ruclaw.android.core.model.PersistedDownloadState
+import com.perdonus.ruclaw.android.core.model.PersistedUpdateState
 import com.perdonus.ruclaw.android.core.util.AppDiagnostics
 import com.perdonus.ruclaw.android.data.local.LocalStateRepository
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoEvent
@@ -22,7 +24,11 @@ import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoHandshake
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoSocket
 import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawApiException
 import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawLauncherClient
+import com.perdonus.ruclaw.android.data.remote.update.ReleaseFeedClient
+import com.perdonus.ruclaw.android.data.update.ApkDownloadState
+import com.perdonus.ruclaw.android.data.update.ApkUpdateManager
 import java.util.UUID
+import kotlin.math.max
 import kotlin.math.min
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -38,6 +44,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as RuClawMobileApp).container
     private val localStateRepository: LocalStateRepository = container.localStateRepository
     private val launcherClient: RuClawLauncherClient = container.newLauncherClient()
+    private val releaseFeedClient: ReleaseFeedClient = container.releaseFeedClient
+    private val apkUpdateManager: ApkUpdateManager = container.apkUpdateManager
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState = _uiState.asStateFlow()
@@ -47,9 +55,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var socketEventsJob: Job? = null
     private var connectionJob: Job? = null
     private var reconnectJob: Job? = null
+    private var updateJob: Job? = null
     private var shouldMaintainConnection = false
     private var reconnectAttempts = 0
     private var cachedHandshake: PicoHandshake? = null
+    private var isCheckingUpdates = false
+    private var downloadProgressPercent: Int? = null
 
     init {
         viewModelScope.launch {
@@ -67,9 +78,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     threads = persisted.threads,
                     activeSessionId = persisted.activeSessionId,
                     messages = cachedSession?.messages ?: emptyList(),
+                    updateState = persisted.updateState.toUiState(),
                     diagnostics = AppDiagnostics.snapshot(),
                 )
             }
+            refreshUpdateFromSystem(showFailureMessage = false)
+            checkForUpdates(silent = true)
             if (persisted.launcherUrl.isNotBlank() && persisted.launcherToken.isNotBlank()) {
                 launchConnectionTask {
                     connectLauncherInternal(silent = true, reconnecting = false)
@@ -268,6 +282,127 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(showSettings = show) }
     }
 
+    fun checkForUpdates(silent: Boolean = false) {
+        updateJob?.cancel()
+        updateJob = viewModelScope.launch {
+            isCheckingUpdates = true
+            applyStoreSnapshot()
+            try {
+                val release = releaseFeedClient.fetchLatestRelease()
+                localStateRepository.updateUpdateState { current ->
+                    val releaseChanged = current.latestVersionName.isNotBlank() && current.latestVersionName != release.versionName
+                    current.copy(
+                        latestVersionName = release.versionName,
+                        releaseTag = release.tagName,
+                        releaseUrl = release.htmlUrl,
+                        releaseNotes = release.releaseNotes,
+                        apkUrl = release.apkUrl,
+                        apkSha256Url = release.apkSha256Url,
+                        publishedAtEpochMillis = release.publishedAtEpochMillis,
+                        lastCheckedAtEpochMillis = System.currentTimeMillis(),
+                        downloadId = if (releaseChanged) null else current.downloadId,
+                        downloadedUri = if (releaseChanged) "" else current.downloadedUri,
+                        downloadState = if (releaseChanged) {
+                            PersistedDownloadState.IDLE
+                        } else {
+                            current.downloadState
+                        },
+                    )
+                }
+                applyStoreSnapshot()
+                val updateAvailable = compareVersionNames(release.versionName, BuildConfig.VERSION_NAME) > 0
+                if (!silent) {
+                    if (updateAvailable) {
+                        showMessage("Доступно обновление ${release.versionName}.")
+                    } else {
+                        showMessage("Обновлений пока нет.")
+                    }
+                }
+            } catch (error: Throwable) {
+                if (error is CancellationException) {
+                    throw error
+                }
+                AppDiagnostics.log("Update check failed: ${error.message ?: "unknown"}")
+                updateDiagnostics()
+                if (!silent) {
+                    showMessage(error.message ?: "Не удалось проверить обновления.")
+                }
+            } finally {
+                isCheckingUpdates = false
+                applyStoreSnapshot()
+            }
+        }
+    }
+
+    fun downloadUpdate() {
+        viewModelScope.launch {
+            val updateState = _uiState.value.updateState
+            if (updateState.apkUrl.isBlank()) {
+                showMessage("В latest release нет APK для Android.")
+                return@launch
+            }
+
+            try {
+                val downloadId = apkUpdateManager.enqueueDownload(
+                    apkUrl = updateState.apkUrl,
+                    versionName = updateState.latestVersionName.ifBlank { updateState.releaseTag.ifBlank { "latest" } },
+                )
+                downloadProgressPercent = 0
+                localStateRepository.updateUpdateState { current ->
+                    current.copy(
+                        downloadId = downloadId,
+                        downloadedUri = "",
+                        downloadState = PersistedDownloadState.DOWNLOADING,
+                    )
+                }
+                applyStoreSnapshot()
+                showMessage("APK отправлен в DownloadManager.")
+            } catch (error: Throwable) {
+                if (error is CancellationException) {
+                    throw error
+                }
+                showMessage(error.message ?: "Не удалось начать загрузку APK.")
+            }
+        }
+    }
+
+    fun installDownloadedUpdate() {
+        viewModelScope.launch {
+            refreshUpdateFromSystem(showFailureMessage = false)
+            val updateState = _uiState.value.updateState
+            if (updateState.downloadedUri.isBlank()) {
+                showMessage("APK ещё не докачался.")
+                return@launch
+            }
+
+            if (!apkUpdateManager.canRequestPackageInstalls()) {
+                _uiState.update {
+                    it.copy(
+                        pendingSystemAction = PendingSystemAction(
+                            type = PendingSystemActionType.OPEN_UNKNOWN_SOURCES_SETTINGS,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            _uiState.update {
+                it.copy(
+                    pendingSystemAction = PendingSystemAction(
+                        type = PendingSystemActionType.INSTALL_APK,
+                        uri = updateState.downloadedUri,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun onAppForegrounded() {
+        viewModelScope.launch {
+            refreshUpdateFromSystem(showFailureMessage = false)
+        }
+    }
+
     fun consumeBannerMessage() {
         _uiState.update { it.copy(bannerMessage = null) }
     }
@@ -278,6 +413,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun consumePendingExternalUrl() {
         _uiState.update { it.copy(pendingExternalUrl = null) }
+    }
+
+    fun consumePendingSystemAction() {
+        _uiState.update { it.copy(pendingSystemAction = null) }
     }
 
     fun announceDownloadPath(path: String) {
@@ -579,6 +718,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun refreshUpdateFromSystem(showFailureMessage: Boolean) {
+        val updateState = localStateRepository.snapshot().updateState
+        val downloadId = updateState.downloadId ?: run {
+            downloadProgressPercent = null
+            applyStoreSnapshot()
+            return
+        }
+        val snapshot = apkUpdateManager.queryDownload(downloadId) ?: run {
+            localStateRepository.updateUpdateState {
+                it.copy(
+                    downloadId = null,
+                    downloadedUri = "",
+                    downloadState = PersistedDownloadState.IDLE,
+                )
+            }
+            downloadProgressPercent = null
+            applyStoreSnapshot()
+            return
+        }
+
+        downloadProgressPercent = snapshot.progressPercent
+        localStateRepository.updateUpdateState { current ->
+            current.copy(
+                downloadId = snapshot.downloadId,
+                downloadedUri = snapshot.localUri,
+                downloadState = when (snapshot.state) {
+                    ApkDownloadState.PENDING,
+                    ApkDownloadState.DOWNLOADING -> PersistedDownloadState.DOWNLOADING
+                    ApkDownloadState.READY_TO_INSTALL -> PersistedDownloadState.READY_TO_INSTALL
+                    ApkDownloadState.FAILED -> PersistedDownloadState.FAILED
+                    ApkDownloadState.IDLE -> current.downloadState
+                },
+            )
+        }
+        applyStoreSnapshot()
+
+        if (showFailureMessage && snapshot.state == ApkDownloadState.FAILED) {
+            showMessage(snapshot.reason ?: "Загрузка APK завершилась ошибкой.")
+        }
+    }
+
     private suspend fun persistSession(
         sessionId: String,
         messages: List<ChatMessage>,
@@ -629,6 +809,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 threads = persisted.threads,
                 activeSessionId = persisted.activeSessionId,
                 messages = messagesOverride ?: activeCached?.messages ?: emptyList(),
+                updateState = persisted.updateState.toUiState(),
                 diagnostics = AppDiagnostics.snapshot(),
             )
         }
@@ -716,9 +897,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun PersistedUpdateState.toUiState(): UpdateUiState {
+        val latestVersion = latestVersionName.trim()
+        return UpdateUiState(
+            currentVersionName = BuildConfig.VERSION_NAME,
+            latestVersionName = latestVersion,
+            releaseTag = releaseTag,
+            releaseUrl = releaseUrl,
+            releaseNotes = releaseNotes,
+            apkUrl = apkUrl,
+            apkSha256Url = apkSha256Url,
+            isChecking = isCheckingUpdates,
+            isUpdateAvailable = latestVersion.isNotBlank() &&
+                compareVersionNames(latestVersion, BuildConfig.VERSION_NAME) > 0,
+            canInstallPackages = apkUpdateManager.canRequestPackageInstalls(),
+            downloadId = downloadId,
+            downloadState = when (downloadState) {
+                PersistedDownloadState.IDLE -> UpdateDownloadState.IDLE
+                PersistedDownloadState.DOWNLOADING -> UpdateDownloadState.DOWNLOADING
+                PersistedDownloadState.READY_TO_INSTALL -> UpdateDownloadState.READY_TO_INSTALL
+                PersistedDownloadState.FAILED -> UpdateDownloadState.FAILED
+            },
+            downloadedUri = downloadedUri,
+            downloadProgressPercent = downloadProgressPercent,
+            lastCheckedAtEpochMillis = lastCheckedAtEpochMillis,
+        )
+    }
+
+    private fun compareVersionNames(left: String, right: String): Int {
+        val leftParts = versionParts(left)
+        val rightParts = versionParts(right)
+        val size = max(leftParts.size, rightParts.size)
+        repeat(size) { index ->
+            val leftPart = leftParts.getOrElse(index) { "0" }
+            val rightPart = rightParts.getOrElse(index) { "0" }
+            val leftNumber = leftPart.toIntOrNull()
+            val rightNumber = rightPart.toIntOrNull()
+            val comparison = when {
+                leftNumber != null && rightNumber != null -> leftNumber.compareTo(rightNumber)
+                else -> leftPart.compareTo(rightPart, ignoreCase = true)
+            }
+            if (comparison != 0) {
+                return comparison
+            }
+        }
+        return 0
+    }
+
+    private fun versionParts(value: String): List<String> {
+        return value.removePrefix("v")
+            .split(Regex("[^A-Za-z0-9]+"))
+            .filter { it.isNotBlank() }
+    }
+
     override fun onCleared() {
         shouldMaintainConnection = false
         cancelReconnectLoop()
+        updateJob?.cancel()
         runBlocking {
             closeSocket()
         }
