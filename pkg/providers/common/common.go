@@ -10,13 +10,18 @@ package common
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Perdonus/ruclaw/pkg/providers/protocoltypes"
@@ -40,28 +45,86 @@ const DefaultRequestTimeout = 120 * time.Second
 
 // NewHTTPClient creates an *http.Client with an optional proxy and the default timeout.
 func NewHTTPClient(proxy string) *http.Client {
-	client := &http.Client{
-		Timeout: DefaultRequestTimeout,
-	}
+	tr := defaultTransportWithIPv4Fallback()
+
 	if proxy != "" {
 		parsed, err := url.Parse(proxy)
 		if err == nil {
-			// Preserve http.DefaultTransport settings (TLS, HTTP/2, timeouts, etc.)
-			if base, ok := http.DefaultTransport.(*http.Transport); ok {
-				tr := base.Clone()
-				tr.Proxy = http.ProxyURL(parsed)
-				client.Transport = tr
-			} else {
-				// Fallback: minimal transport if DefaultTransport is not *http.Transport.
-				client.Transport = &http.Transport{
-					Proxy: http.ProxyURL(parsed),
-				}
-			}
+			tr.Proxy = http.ProxyURL(parsed)
 		} else {
 			log.Printf("common: invalid proxy URL %q: %v", proxy, err)
 		}
 	}
-	return client
+
+	return &http.Client{
+		Timeout:   DefaultRequestTimeout,
+		Transport: tr,
+	}
+}
+
+func defaultTransportWithIPv4Fallback() *http.Transport {
+	var tr *http.Transport
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr = base.Clone()
+	} else {
+		tr = &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		}
+	}
+
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	tr.DialContext = dialContextWithIPv4Fallback(dialer)
+	return tr
+}
+
+func dialContextWithIPv4Fallback(dialer *net.Dialer) func(ctx context.Context, network, address string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := dialer.DialContext(ctx, network, address)
+		if err == nil || !shouldRetryWithIPv4(network, address, err) {
+			return conn, err
+		}
+		return dialer.DialContext(ctx, "tcp4", address)
+	}
+}
+
+func shouldRetryWithIPv4(network, address string, err error) bool {
+	if !strings.HasPrefix(network, "tcp") || strings.HasSuffix(network, "4") {
+		return false
+	}
+	host, _, splitErr := net.SplitHostPort(address)
+	if splitErr == nil {
+		host = strings.Trim(host, "[]")
+		if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+			return false
+		}
+	}
+	return isIPv6RoutingFailure(err)
+}
+
+func isIPv6RoutingFailure(err error) bool {
+	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) {
+		return true
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if errors.Is(opErr.Err, syscall.ENETUNREACH) || errors.Is(opErr.Err, syscall.EHOSTUNREACH) {
+			return true
+		}
+	}
+
+	var sysErr *os.SyscallError
+	if errors.As(err, &sysErr) {
+		if errors.Is(sysErr.Err, syscall.ENETUNREACH) || errors.Is(sysErr.Err, syscall.EHOSTUNREACH) {
+			return true
+		}
+	}
+
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "network is unreachable") || strings.Contains(errMsg, "no route to host")
 }
 
 // --- Message serialization ---

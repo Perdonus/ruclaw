@@ -2,10 +2,13 @@ package common
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Perdonus/ruclaw/pkg/providers/protocoltypes"
@@ -38,16 +41,45 @@ func TestNewHTTPClient_WithProxy(t *testing.T) {
 
 func TestNewHTTPClient_NoProxy(t *testing.T) {
 	client := NewHTTPClient("")
-	if client.Transport != nil {
-		t.Errorf("expected nil transport without proxy, got %T", client.Transport)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("expected http.Transport without proxy, got %T", client.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("expected Proxy function to be configured")
 	}
 }
 
 func TestNewHTTPClient_InvalidProxy(t *testing.T) {
-	// Should not panic, just log and return client without proxy
+	// Should not panic, just log and return client with default transport behavior.
 	client := NewHTTPClient("://bad-url")
-	if client == nil {
-		t.Fatal("expected non-nil client even with invalid proxy")
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport == nil {
+		t.Fatalf("expected http.Transport even with invalid proxy, got %T", client.Transport)
+	}
+}
+
+func TestShouldRetryWithIPv4_TrueOnNetworkUnreachable(t *testing.T) {
+	err := &net.OpError{
+		Err: &os.SyscallError{
+			Syscall: "connect",
+			Err:     syscall.ENETUNREACH,
+		},
+	}
+	if !shouldRetryWithIPv4("tcp", "api.mistral.ai:443", err) {
+		t.Fatal("expected IPv4 fallback retry for unreachable IPv6 route")
+	}
+}
+
+func TestShouldRetryWithIPv4_FalseForIPv6Literal(t *testing.T) {
+	err := &net.OpError{
+		Err: &os.SyscallError{
+			Syscall: "connect",
+			Err:     syscall.ENETUNREACH,
+		},
+	}
+	if shouldRetryWithIPv4("tcp", "[2606:4700:7::2c3]:443", err) {
+		t.Fatal("expected no IPv4 fallback for IPv6 literal address")
 	}
 }
 

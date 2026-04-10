@@ -2074,6 +2074,8 @@ turnLoop:
 				strings.Contains(errMsg, "prompt is too long") ||
 				strings.Contains(errMsg, "request too large"))
 
+			isTransientError := !isTimeoutError && !isContextError && isTransientLLMError(errMsg)
+
 			if isTimeoutError && retry < maxRetries {
 				backoff := time.Duration(retry+1) * 5 * time.Second
 				al.emitEvent(
@@ -2088,6 +2090,35 @@ turnLoop:
 					},
 				)
 				logger.WarnCF("agent", "Timeout error, retrying after backoff", map[string]any{
+					"error":   err.Error(),
+					"retry":   retry,
+					"backoff": backoff.String(),
+				})
+				if sleepErr := sleepWithContext(turnCtx, backoff); sleepErr != nil {
+					if ts.hardAbortRequested() {
+						turnStatus = TurnEndStatusAborted
+						return al.abortTurn(ts)
+					}
+					err = sleepErr
+					break
+				}
+				continue
+			}
+
+			if isTransientError && retry < maxRetries {
+				backoff := time.Duration(retry+1) * 3 * time.Second
+				al.emitEvent(
+					EventKindLLMRetry,
+					ts.eventMeta("runTurn", "turn.llm.retry"),
+					LLMRetryPayload{
+						Attempt:    retry + 1,
+						MaxRetries: maxRetries,
+						Reason:     "transient_upstream",
+						Error:      err.Error(),
+						Backoff:    backoff,
+					},
+				)
+				logger.WarnCF("agent", "Transient upstream error, retrying after backoff", map[string]any{
 					"error":   err.Error(),
 					"retry":   retry,
 					"backoff": backoff.String(),
