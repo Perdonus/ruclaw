@@ -186,6 +186,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            shouldMaintainConnection = false
+            reconnectAttempts = 0
+            cancelReconnectLoop()
+            closeSocket()
+            runCatching { localRuntimeManager.stopLocalRuntime() }
+            cachedHandshake = null
+            _uiState.update {
+                it.copy(
+                    showAgentSheet = false,
+                    launcherCatalog = LauncherCatalogState(),
+                )
+            }
+            updateConnectionState(ConnectionStatus.DISCONNECTED, "Локальный runtime обновляется…")
+
             _uiState.update {
                 it.copy(
                     localRuntime = it.localRuntime.copy(
@@ -1400,7 +1414,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return when (_uiState.value.launcherMode) {
             LauncherMode.LOCAL -> {
                 val localRuntime = _uiState.value.localRuntime
-                if (!localRuntime.isInstalled) {
+                val status = _uiState.value.connectionState.status
+                if (
+                    !localRuntime.isInstalled ||
+                    status !in setOf(
+                        ConnectionStatus.CONNECTING,
+                        ConnectionStatus.CONNECTED,
+                        ConnectionStatus.RECONNECTING,
+                    )
+                ) {
                     null
                 } else {
                     LauncherConfigDraft(

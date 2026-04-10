@@ -86,7 +86,11 @@ fun AgentSheet(
             if (!state.hasConfiguredLauncher) {
                 SectionCard {
                     Text(
-                        text = "Сначала укажи launcher URL и access token в настройках.",
+                        text = if (state.launcherMode == com.perdonus.ruclaw.android.core.model.LauncherMode.LOCAL) {
+                            "Сначала установи и запусти локальный RuClaw в настройках."
+                        } else {
+                            "Сначала укажи launcher URL и access token в настройках."
+                        },
                         color = Color.White,
                         style = MaterialTheme.typography.bodyLarge,
                     )

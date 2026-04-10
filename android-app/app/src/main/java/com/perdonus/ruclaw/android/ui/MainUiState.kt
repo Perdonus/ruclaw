@@ -4,8 +4,9 @@ import com.perdonus.ruclaw.android.core.model.ChatMessage
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.ComposerState
 import com.perdonus.ruclaw.android.core.model.ConnectionState
-import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.LauncherConfigDraft
+import com.perdonus.ruclaw.android.core.model.ConnectionStatus
+import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.LauncherModelItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
@@ -107,7 +108,7 @@ val MainUiState.activeThread: ChatThreadSummary?
 
 val MainUiState.hasConfiguredLauncher: Boolean
     get() = when (launcherMode) {
-        LauncherMode.LOCAL -> localRuntime.isInstalled
+        LauncherMode.LOCAL -> connectionState.status == ConnectionStatus.CONNECTED
         LauncherMode.REMOTE -> launcherConfig.url.trim().isNotBlank() && launcherConfig.token.trim().isNotBlank()
     }
 

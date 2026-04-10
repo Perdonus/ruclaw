@@ -143,6 +143,19 @@ fun MainScreen(viewModel: MainViewModel) {
             viewModel.addComposerPhoto(uri)
         }
     }
+    val ggufPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.onLocalModelPathChanged(uri.toString())
+        }
+    }
 
     LaunchedEffect(state.bannerMessage) {
         state.bannerMessage?.let { message ->
@@ -1058,8 +1071,11 @@ private fun EmptyStage(
         Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = when {
-                state.launcherMode == LauncherMode.LOCAL && state.hasConfiguredLauncher ->
+                state.launcherMode == LauncherMode.LOCAL &&
+                    state.connectionState.status == ConnectionStatus.CONNECTED ->
                     "Локальный RuClaw готов. Выбери тред слева или начни новый диалог."
+                state.launcherMode == LauncherMode.LOCAL && state.localRuntime.isInstalled ->
+                    "Локальный runtime установлен. Открой настройки и нажми «Запустить локально». GGUF модель можно добавить потом."
                 state.launcherMode == LauncherMode.LOCAL ->
                     "Открой настройки и нажми «Установить». GGUF модель можно добавить потом, это опционально."
                 state.hasConfiguredLauncher ->
@@ -1163,6 +1179,7 @@ private fun SettingsSheet(
                     connectionStatus = state.connectionState.status,
                     onInstall = viewModel::installLocalRuntime,
                     onGgufPathChanged = viewModel::onLocalModelPathChanged,
+                    onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
                     onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
                     onLaunch = {
                         viewModel.toggleSettings(false)
@@ -1243,6 +1260,7 @@ private fun LocalRuntimeSection(
     connectionStatus: ConnectionStatus,
     onInstall: () -> Unit,
     onGgufPathChanged: (String) -> Unit,
+    onPickGguf: () -> Unit,
     onKeepAliveChanged: (Boolean) -> Unit,
     onLaunch: () -> Unit,
 ) {
@@ -1276,18 +1294,32 @@ private fun LocalRuntimeSection(
                             color = Color.White,
                         )
                         Text(
-                            text = if (localRuntime.runtimeVersion.isNotBlank()) {
-                                "Версия runtime: " + localRuntime.runtimeVersion
+                            text = if (connectionStatus == ConnectionStatus.CONNECTED) {
+                                "Локальный launcher уже запущен на устройстве."
+                            } else if (localRuntime.runtimeVersion.isNotBlank()) {
+                                "Runtime установлен. Теперь можно запустить локальный launcher."
                             } else {
                                 "Это полноценный локальный RuClaw на устройстве. GGUF модель можно добавить отдельно."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFFB8C4D2),
                         )
+                        if (localRuntime.runtimeVersion.isNotBlank()) {
+                            Text(
+                                text = "Версия runtime: " + localRuntime.runtimeVersion,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF8FA1B5),
+                            )
+                        }
                     }
                     FilledTonalButton(
                         onClick = onInstall,
-                        enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING,
+                        enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING &&
+                            connectionStatus !in setOf(
+                                ConnectionStatus.CONNECTING,
+                                ConnectionStatus.CONNECTED,
+                                ConnectionStatus.RECONNECTING,
+                            ),
                         shape = RoundedCornerShape(18.dp),
                     ) {
                         if (localRuntime.installState == LocalRuntimeInstallState.INSTALLING) {
@@ -1355,13 +1387,20 @@ private fun LocalRuntimeSection(
                     onValueChange = onGgufPathChanged,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Путь до GGUF") },
-                    placeholder = { Text("/storage/emulated/0/Download/model.gguf") },
+                    placeholder = { Text("/storage/emulated/0/Download/model.gguf или content://...") },
                     singleLine = true,
                     colors = sheetFieldColors(),
                 )
 
+                TextButton(
+                    onClick = onPickGguf,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Выбрать GGUF")
+                }
+
                 Text(
-                    text = "GGUF модель опциональна. Если укажешь путь, я автоматически подниму локальный model server и добавлю модель в локальный RuClaw.",
+                    text = "GGUF модель опциональна. Можно вставить путь вручную или выбрать файл через системный picker. Если путь указан, я автоматически подниму локальный model server и добавлю модель в локальный RuClaw.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFB8C4D2),
                 )
