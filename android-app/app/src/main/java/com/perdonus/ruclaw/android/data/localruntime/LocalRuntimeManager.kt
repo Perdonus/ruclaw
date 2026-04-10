@@ -29,6 +29,7 @@ class LocalRuntimeManager(context: Context) {
     private val appContext = context.applicationContext
     private val runtimeRoot = File(appContext.filesDir, "local-runtime")
     private val binDir = File(runtimeRoot, "bin")
+    private val libDir = File(runtimeRoot, "lib")
     private val homeDir = File(runtimeRoot, "home")
     private val logsDir = File(runtimeRoot, "logs")
     private val modelsDir = File(runtimeRoot, "models")
@@ -48,6 +49,8 @@ class LocalRuntimeManager(context: Context) {
         log("Готовлю sandbox для локального RuClaw…")
         runtimeRoot.mkdirs()
         binDir.mkdirs()
+        libDir.deleteRecursively()
+        libDir.mkdirs()
         homeDir.mkdirs()
         logsDir.mkdirs()
         modelsDir.mkdirs()
@@ -60,6 +63,7 @@ class LocalRuntimeManager(context: Context) {
             File(binDir, modelServerAssetName),
             log,
         )
+        extractOptionalBundledDirectory("$assetDir/lib", libDir, log)
 
         File(runtimeRoot, "VERSION.txt").writeText(BuildConfig.VERSION_NAME + "\n")
         log("Локальный runtime готов.")
@@ -182,6 +186,30 @@ class LocalRuntimeManager(context: Context) {
             runCatching { target.delete() }
             log("Пропускаю $assetName: локальный GGUF останется опциональным.")
             null
+        }
+    }
+
+    private suspend fun extractOptionalBundledDirectory(
+        assetPath: String,
+        targetDir: File,
+        log: suspend (String) -> Unit,
+    ) {
+        val entries = appContext.assets.list(assetPath).orEmpty()
+        if (entries.isEmpty()) {
+            return
+        }
+        targetDir.mkdirs()
+        entries.forEach { name ->
+            val target = File(targetDir, name)
+            log("Распаковываю ${target.relativeTo(runtimeRoot).path}…")
+            appContext.assets.open("$assetPath/$name").use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            target.setReadable(true, true)
+            target.setWritable(true, true)
+            if (name.endsWith(".so")) {
+                target.setExecutable(true, true)
+            }
         }
     }
 
@@ -370,6 +398,9 @@ class LocalRuntimeManager(context: Context) {
                 environment()["PICOCLAW_CONFIG"] = File(homeDir, "config.json").absolutePath
                 environment()["PICOCLAW_BINARY"] = File(binDir, coreBinaryAssetName).absolutePath
                 environment()["PICOCLAW_LAUNCHER_TOKEN"] = launcherToken
+                if (libDir.exists() && !libDir.listFiles().isNullOrEmpty()) {
+                    environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
+                }
             }
             .start()
 
