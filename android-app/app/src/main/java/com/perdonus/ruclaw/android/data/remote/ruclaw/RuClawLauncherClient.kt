@@ -438,7 +438,7 @@ class PicoSocket(
                     socket = null
                     val failure = response?.let { upgradeResponse ->
                         val body = runCatching { upgradeResponse.body?.string().orEmpty() }.getOrDefault("")
-                        toApiException(upgradeResponse, body)
+                        toSocketApiException(upgradeResponse, body)
                     } ?: t
                     failed.complete(failure)
                     _events.tryEmit(
@@ -557,6 +557,16 @@ class PicoSocket(
 
             "pong" -> _events.tryEmit(PicoEvent.Pong)
         }
+    }
+
+    private fun toSocketApiException(response: Response, body: String): RuClawApiException {
+        val parsedMessage = runCatching {
+            json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull
+                ?: json.parseToJsonElement(body).jsonObject["message"]?.jsonPrimitive?.contentOrNull
+        }.getOrNull()
+        val message = parsedMessage?.takeIf { it.isNotBlank() }
+            ?: body.trim().ifBlank { "HTTP " + response.code }
+        return RuClawApiException(response.code, message)
     }
 
     private fun escape(value: String): String {
