@@ -1,0 +1,38 @@
+name: Android Release Artifact
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build Android release archive
+        env:
+          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+        run: ./scripts/build-release-artifact.sh android
+
+      - name: Upload Android release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruclaw-android-release-${{ github.sha }}
+          path: |
+            release-artifacts/ruclaw_Android_arm64.tar.gz
+            release-artifacts/ruclaw_Android_arm64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14

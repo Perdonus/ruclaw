@@ -1,0 +1,48 @@
+name: Linux Release Artifact
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/frontend/pnpm-lock.yaml
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Build Linux release archive
+        env:
+          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+        run: ./scripts/build-release-artifact.sh linux
+
+      - name: Upload Linux release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruclaw-linux-release-${{ github.sha }}
+          path: |
+            release-artifacts/ruclaw_Linux_x86_64.tar.gz
+            release-artifacts/ruclaw_Linux_x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14

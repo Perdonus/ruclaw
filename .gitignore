@@ -51,6 +51,7 @@ docs/superpowers/
 
 # Added by goreleaser init:
 dist/
+release-artifacts/
 *.vite/
 
 # Windows Application Icon/Resource
