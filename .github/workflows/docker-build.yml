@@ -21,6 +21,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      HAS_DOCKERHUB: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' && vars.DOCKERHUB_REPOSITORY != '' }}
 
     steps:
       # ── Checkout ──────────────────────────────
@@ -43,6 +45,7 @@ jobs:
 
       # ── Login to Docker Hub ────────────────────
       - name: 🔑 Login to Docker Hub
+        if: ${{ env.HAS_DOCKERHUB == 'true' }}
         uses: docker/login-action@v4
         with:
           registry: ${{ env.DOCKERHUB_REGISTRY }}
@@ -55,10 +58,16 @@ jobs:
         shell: bash
         run: |
           tag="${{ inputs.tag }}"
-          echo "ghcr_tag=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "ghcr_latest=${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
-          echo "dockerhub_tag=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:${tag}" >> "$GITHUB_OUTPUT"
-          echo "dockerhub_latest=${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+          {
+            echo 'tags<<EOF'
+            echo "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:${tag}"
+            echo "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}:latest"
+            if [[ "${HAS_DOCKERHUB}" == "true" ]]; then
+              echo "${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:${tag}"
+              echo "${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
       # ── Build & Push ──────────────────────────
       - name: 🚀 Build and push Docker image
@@ -66,11 +75,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ steps.tags.outputs.ghcr_tag }}
-            ${{ steps.tags.outputs.ghcr_latest }}
-            ${{ steps.tags.outputs.dockerhub_tag }}
-            ${{ steps.tags.outputs.dockerhub_latest }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64,linux/riscv64

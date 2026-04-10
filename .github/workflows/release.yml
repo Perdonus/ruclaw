@@ -21,7 +21,7 @@ on:
         description: "Upload to Volcengine TOS"
         required: false
         type: boolean
-        default: true
+        default: false
   push:
     tags:
       - "v*"
@@ -157,7 +157,7 @@ jobs:
             --prerelease=${{ inputs.prerelease }}
 
   release-tag:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' && github.actor != 'github-actions[bot]' }}
     name: GoReleaser Release (tag push)
     runs-on: ubuntu-latest
     permissions:
@@ -256,7 +256,7 @@ jobs:
   upload-tos:
     name: Upload to TOS
     needs: release-manual
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_tos }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload_tos && secrets.VOLC_TOS_ACCESS_KEY != '' && secrets.VOLC_TOS_SECRET_KEY != '' }}
     uses: ./.github/workflows/upload-tos.yml
     with:
       tag: ${{ inputs.tag }}
