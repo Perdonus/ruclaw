@@ -595,6 +595,13 @@ func TestDefaultConfig_ExecAllowRemoteEnabled(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_ExecDenyPatternsDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Tools.Exec.EnableDenyPatterns {
+		t.Fatal("DefaultConfig().Tools.Exec.EnableDenyPatterns should be false")
+	}
+}
+
 func TestDefaultConfig_FilterSensitiveDataEnabled(t *testing.T) {
 	cfg := DefaultConfig()
 	if !cfg.Tools.FilterSensitiveData {

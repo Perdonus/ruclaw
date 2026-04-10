@@ -703,6 +703,27 @@ func TestShellTool_URLBypassPrevented(t *testing.T) {
 	}
 }
 
+func TestShellTool_RelativeSlashPathsNotBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	tool, err := NewExecTool(tmpDir, true)
+	if err != nil {
+		t.Fatalf("unable to configure exec tool: %s", err)
+	}
+
+	commands := []string{
+		"printf 'ok' > output.txt",
+		"./infsh app run infsh/diffrythm --output output.mp3",
+		"./infsh app run infsh/diffrythm --output output/motivational_track.mp3",
+	}
+
+	for _, cmd := range commands {
+		result := tool.Execute(context.Background(), map[string]any{"action": "run", "command": cmd})
+		if result.IsError && strings.Contains(result.ForLLM, "path outside working dir") {
+			t.Errorf("relative slash path should not be blocked: %q\n  error: %s", cmd, result.ForLLM)
+		}
+	}
+}
+
 func TestShellTool_Background_ReturnsImmediately(t *testing.T) {
 	tool, err := NewExecTool("", false)
 	require.NoError(t, err)

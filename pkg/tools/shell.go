@@ -1073,6 +1073,14 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		for _, loc := range matchIndices {
 			raw := cmd[loc[0]:loc[1]]
 
+			// Avoid false positives on relative path segments like "tool/subcommand"
+			// where the regex finds the "/subcommand" suffix. Only treat a slash
+			// match as an absolute path when it begins at the command start or when
+			// the preceding byte is a shell/path delimiter.
+			if strings.HasPrefix(raw, "/") && loc[0] > 0 && !isCommandPathBoundary(cmd[loc[0]-1]) {
+				continue
+			}
+
 			// Skip URL path components that look like they're from web URLs.
 			// When a URL like "https://github.com" is parsed, the regex captures
 			// "//github.com" as a match (the path portion after "https:").
@@ -1118,6 +1126,15 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 	}
 
 	return ""
+}
+
+func isCommandPathBoundary(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '"', '\'', '`', '=', ':', '(', '[', '{', '<', '>', '|', '&', ';':
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *ExecTool) SetTimeout(timeout time.Duration) {

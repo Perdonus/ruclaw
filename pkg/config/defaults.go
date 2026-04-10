@@ -25,7 +25,8 @@ func DefaultConfig() *Config {
 		Agents: AgentsConfig{
 			Defaults: AgentDefaults{
 				Workspace:                 workspacePath,
-				RestrictToWorkspace:       true,
+				RestrictToWorkspace:       false,
+				AllowReadOutsideWorkspace: true,
 				Provider:                  "",
 				MaxTokens:                 32768,
 				Temperature:               nil, // nil means use provider default
@@ -430,7 +431,7 @@ func DefaultConfig() *Config {
 				ToolConfig: ToolConfig{
 					Enabled: true,
 				},
-				EnableDenyPatterns: true,
+				EnableDenyPatterns: false,
 				AllowRemote:        true,
 				TimeoutSeconds:     60,
 			},
