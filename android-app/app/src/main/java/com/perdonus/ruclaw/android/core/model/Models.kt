@@ -6,11 +6,19 @@ import kotlinx.serialization.Serializable
 data class PersistedAppState(
     val launcherUrl: String = "",
     val launcherToken: String = "",
+    val launcherMode: LauncherMode = LauncherMode.REMOTE,
+    val localRuntime: PersistedLocalRuntimeState = PersistedLocalRuntimeState(),
     val activeSessionId: String? = null,
     val threads: List<ChatThreadSummary> = emptyList(),
     val cachedSessions: List<CachedSession> = emptyList(),
     val updateState: PersistedUpdateState = PersistedUpdateState(),
 )
+
+@Serializable
+enum class LauncherMode {
+    REMOTE,
+    LOCAL,
+}
 
 @Serializable
 data class ChatThreadSummary(
@@ -59,6 +67,17 @@ enum class MessageStatus {
 data class LauncherConfigDraft(
     val url: String = "",
     val token: String = "",
+)
+
+@Serializable
+data class PersistedLocalRuntimeState(
+    val isInstalled: Boolean = false,
+    val runtimeVersion: String = "",
+    val runtimeRoot: String = "",
+    val launcherUrl: String = "",
+    val launcherToken: String = "",
+    val ggufPath: String = "",
+    val keepAliveEnabled: Boolean = true,
 )
 
 data class ComposerState(

@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -85,6 +86,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -120,6 +122,7 @@ import com.perdonus.ruclaw.android.core.model.ChatRole
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.ComposerAttachment
 import com.perdonus.ruclaw.android.core.model.ConnectionStatus
+import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.ui.components.MarkdownMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1054,10 +1057,15 @@ private fun EmptyStage(
         )
         Spacer(modifier = Modifier.height(10.dp))
         Text(
-            text = if (state.hasConfiguredLauncher) {
-                "Выбери тред слева или начни новый диалог."
-            } else {
-                "Открой настройки, укажи launcher URL и access token, потом можно писать прямо сюда."
+            text = when {
+                state.launcherMode == LauncherMode.LOCAL && state.hasConfiguredLauncher ->
+                    "Локальный RuClaw готов. Выбери тред слева или начни новый диалог."
+                state.launcherMode == LauncherMode.LOCAL ->
+                    "Открой настройки и нажми «Установить». GGUF модель можно добавить потом, это опционально."
+                state.hasConfiguredLauncher ->
+                    "Выбери тред слева или начни новый диалог."
+                else ->
+                    "Открой настройки, укажи launcher URL и access token, потом можно писать прямо сюда."
             },
             style = MaterialTheme.typography.bodyLarge,
             color = Color(0xFFB8C4D2),
@@ -1108,40 +1116,59 @@ private fun SettingsSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Настройки launcher",
+                text = "Настройки подключения",
                 style = MaterialTheme.typography.titleLarge,
                 color = Color.White,
             )
 
-            OutlinedTextField(
-                value = state.launcherConfig.url,
-                onValueChange = viewModel::onLauncherUrlChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Launcher URL") },
-                placeholder = { Text("http://192.168.1.109:18800") },
-                singleLine = true,
-                colors = sheetFieldColors(),
+            ConnectionModeCard(
+                launcherMode = state.launcherMode,
+                onModeChanged = viewModel::onLauncherModeChanged,
             )
 
-            OutlinedTextField(
-                value = state.launcherConfig.token,
-                onValueChange = viewModel::onLauncherTokenChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Launcher access token") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                colors = sheetFieldColors(),
-            )
+            if (state.launcherMode == LauncherMode.REMOTE) {
+                OutlinedTextField(
+                    value = state.launcherConfig.url,
+                    onValueChange = viewModel::onLauncherUrlChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Launcher URL") },
+                    placeholder = { Text("http://192.168.1.109:18800") },
+                    singleLine = true,
+                    colors = sheetFieldColors(),
+                )
 
-            FilledTonalButton(
-                onClick = {
-                    viewModel.toggleSettings(false)
-                    viewModel.connectLauncher()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Text("Подключить")
+                OutlinedTextField(
+                    value = state.launcherConfig.token,
+                    onValueChange = viewModel::onLauncherTokenChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Launcher access token") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = sheetFieldColors(),
+                )
+
+                FilledTonalButton(
+                    onClick = {
+                        viewModel.toggleSettings(false)
+                        viewModel.connectLauncher()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                ) {
+                    Text("Подключить")
+                }
+            } else {
+                LocalRuntimeSection(
+                    localRuntime = state.localRuntime,
+                    connectionStatus = state.connectionState.status,
+                    onInstall = viewModel::installLocalRuntime,
+                    onGgufPathChanged = viewModel::onLocalModelPathChanged,
+                    onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
+                    onLaunch = {
+                        viewModel.toggleSettings(false)
+                        viewModel.connectLauncher()
+                    },
+                )
             }
 
             HorizontalDivider(color = Color(0x1FFFFFFF))
@@ -1159,6 +1186,238 @@ private fun SettingsSheet(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ConnectionModeCard(
+    launcherMode: LauncherMode,
+    onModeChanged: (LauncherMode) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xCC182231),
+        border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Локальный RuClaw",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
+                Text(
+                    text = if (launcherMode == LauncherMode.LOCAL) {
+                        "Включён локальный запуск: приложение само поднимет runtime и launcher."
+                    } else {
+                        "Выключен: использую обычное подключение к внешнему launcher по URL и токену."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFB8C4D2),
+                )
+            }
+            Switch(
+                checked = launcherMode == LauncherMode.LOCAL,
+                onCheckedChange = { enabled ->
+                    onModeChanged(if (enabled) LauncherMode.LOCAL else LauncherMode.REMOTE)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocalRuntimeSection(
+    localRuntime: LocalRuntimeUiState,
+    connectionStatus: ConnectionStatus,
+    onInstall: () -> Unit,
+    onGgufPathChanged: (String) -> Unit,
+    onKeepAliveChanged: (Boolean) -> Unit,
+    onLaunch: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xCC182231),
+            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = if (localRuntime.isInstalled) {
+                                "Локальный runtime установлен"
+                            } else {
+                                "Сначала установи локальный runtime"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White,
+                        )
+                        Text(
+                            text = if (localRuntime.runtimeVersion.isNotBlank()) {
+                                "Версия runtime: " + localRuntime.runtimeVersion
+                            } else {
+                                "Это полноценный локальный RuClaw на устройстве. GGUF модель можно добавить отдельно."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFB8C4D2),
+                        )
+                    }
+                    FilledTonalButton(
+                        onClick = onInstall,
+                        enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING,
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        if (localRuntime.installState == LocalRuntimeInstallState.INSTALLING) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Установка…")
+                        } else {
+                            Text(if (localRuntime.isInstalled) "Переустановить" else "Установить")
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = localRuntime.installState == LocalRuntimeInstallState.INSTALLING ||
+                        localRuntime.installState == LocalRuntimeInstallState.FAILED ||
+                        localRuntime.installLogs.isNotEmpty(),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF0E141D),
+                        border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (localRuntime.installState == LocalRuntimeInstallState.INSTALLING) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color(0xFF72D8C4),
+                                    )
+                                }
+                                Text(
+                                    text = if (localRuntime.installState == LocalRuntimeInstallState.FAILED) {
+                                        "Установка сорвалась"
+                                    } else {
+                                        "Логи установки"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White,
+                                )
+                            }
+                            localRuntime.installLogs.takeLast(8).forEach { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFD3DAE3),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = localRuntime.ggufPath,
+                    onValueChange = onGgufPathChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Путь до GGUF") },
+                    placeholder = { Text("/storage/emulated/0/Download/model.gguf") },
+                    singleLine = true,
+                    colors = sheetFieldColors(),
+                )
+
+                Text(
+                    text = "GGUF модель опциональна. Если укажешь путь, я автоматически подниму локальный model server и добавлю модель в локальный RuClaw.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB8C4D2),
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0x66111823),
+                    border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Keep alive уведомление",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White,
+                            )
+                            Text(
+                                text = "Держит локальный RuClaw живым в фоне через foreground notification. Можно выключить.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFB8C4D2),
+                            )
+                        }
+                        Switch(
+                            checked = localRuntime.keepAliveEnabled,
+                            onCheckedChange = onKeepAliveChanged,
+                        )
+                    }
+                }
+
+                FilledTonalButton(
+                    onClick = onLaunch,
+                    enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING &&
+                        localRuntime.isInstalled,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                ) {
+                    Text(
+                        when (connectionStatus) {
+                            ConnectionStatus.CONNECTING,
+                            ConnectionStatus.RECONNECTING -> "Поднимаю локальный RuClaw…"
+                            ConnectionStatus.CONNECTED -> "Перезапустить локально"
+                            else -> "Запустить локально"
+                        },
+                    )
+                }
+            }
         }
     }
 }

@@ -3,7 +3,9 @@ package com.perdonus.ruclaw.android.data.local
 import android.content.Context
 import com.perdonus.ruclaw.android.core.model.CachedSession
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
+import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.PersistedAppState
+import com.perdonus.ruclaw.android.core.model.PersistedLocalRuntimeState
 import com.perdonus.ruclaw.android.core.model.PersistedUpdateState
 import com.perdonus.ruclaw.android.core.util.JsonFileStore
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +31,18 @@ class LocalStateRepository(context: Context) {
                 launcherUrl = normalizedUrl,
                 launcherToken = token.trim(),
             )
+        }
+    }
+
+    suspend fun saveLauncherMode(mode: LauncherMode): PersistedAppState {
+        return store.update { current ->
+            current.copy(launcherMode = mode)
+        }
+    }
+
+    suspend fun updateLocalRuntime(transform: (PersistedLocalRuntimeState) -> PersistedLocalRuntimeState): PersistedAppState {
+        return store.update { current ->
+            current.copy(localRuntime = transform(current.localRuntime))
         }
     }
 

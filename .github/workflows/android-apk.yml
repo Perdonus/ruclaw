@@ -7,10 +7,24 @@ on:
       - main
     paths:
       - "android-app/**"
+      - "cmd/picoclaw/**"
+      - "pkg/**"
+      - "web/backend/**"
+      - "web/frontend/**"
+      - "scripts/build-android-runtime-assets.sh"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/android-apk.yml"
   pull_request:
     paths:
       - "android-app/**"
+      - "cmd/picoclaw/**"
+      - "pkg/**"
+      - "web/backend/**"
+      - "web/frontend/**"
+      - "scripts/build-android-runtime-assets.sh"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/android-apk.yml"
 
 permissions:
@@ -36,6 +50,20 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Go
+        id: setup-go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -43,7 +71,16 @@ jobs:
         run: |
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Build Android runtime assets
+        working-directory: .
+        env:
+          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
+        run: |
+          ./scripts/build-android-runtime-assets.sh "${RUNNER_TEMP}/android-runtime-assets"
+
       - name: Build debug APK
+        env:
+          RUCLAW_ANDROID_RUNTIME_ASSETS_DIR: ${{ runner.temp }}/android-runtime-assets
         run: |
           set -o pipefail
           ./gradlew --no-daemon --stacktrace --console=plain assembleDebug 2>&1 | tee gradle-build.log

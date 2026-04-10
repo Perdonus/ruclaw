@@ -2,6 +2,7 @@ package com.perdonus.ruclaw.android
 
 import android.content.Context
 import com.perdonus.ruclaw.android.data.local.LocalStateRepository
+import com.perdonus.ruclaw.android.data.localruntime.LocalRuntimeManager
 import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawLauncherClient
 import com.perdonus.ruclaw.android.data.remote.update.ReleaseFeedClient
 import com.perdonus.ruclaw.android.data.update.ApkUpdateManager
@@ -19,6 +20,7 @@ class AppContainer(context: Context) {
         .build()
 
     val localStateRepository by lazy { LocalStateRepository(appContext) }
+    val localRuntimeManager by lazy { LocalRuntimeManager(appContext) }
     val releaseFeedClient by lazy { ReleaseFeedClient(sharedOkHttpClient) }
     val apkUpdateManager by lazy { ApkUpdateManager(appContext) }
 

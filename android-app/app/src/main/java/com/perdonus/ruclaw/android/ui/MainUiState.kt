@@ -4,6 +4,7 @@ import com.perdonus.ruclaw.android.core.model.ChatMessage
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.ComposerState
 import com.perdonus.ruclaw.android.core.model.ConnectionState
+import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.LauncherConfigDraft
 import com.perdonus.ruclaw.android.core.model.LauncherModelItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
@@ -12,7 +13,9 @@ import com.perdonus.ruclaw.android.core.model.LauncherToolItem
 
 data class MainUiState(
     val isLoaded: Boolean = false,
+    val launcherMode: LauncherMode = LauncherMode.REMOTE,
     val launcherConfig: LauncherConfigDraft = LauncherConfigDraft(),
+    val localRuntime: LocalRuntimeUiState = LocalRuntimeUiState(),
     val connectionState: ConnectionState = ConnectionState(),
     val threads: List<ChatThreadSummary> = emptyList(),
     val activeSessionId: String? = null,
@@ -30,6 +33,25 @@ data class MainUiState(
     val updateState: UpdateUiState = UpdateUiState(),
     val diagnostics: List<String> = emptyList(),
 )
+
+data class LocalRuntimeUiState(
+    val isInstalled: Boolean = false,
+    val runtimeVersion: String = "",
+    val runtimeRoot: String = "",
+    val launcherUrl: String = DEFAULT_LOCAL_LAUNCHER_URL,
+    val launcherToken: String = DEFAULT_LOCAL_LAUNCHER_TOKEN,
+    val ggufPath: String = "",
+    val keepAliveEnabled: Boolean = true,
+    val installState: LocalRuntimeInstallState = LocalRuntimeInstallState.IDLE,
+    val installLogs: List<String> = emptyList(),
+)
+
+enum class LocalRuntimeInstallState {
+    IDLE,
+    INSTALLING,
+    READY,
+    FAILED,
+}
 
 data class LauncherCatalogState(
     val isLoading: Boolean = false,
@@ -84,4 +106,10 @@ val MainUiState.activeThread: ChatThreadSummary?
     get() = threads.firstOrNull { it.sessionId == activeSessionId }
 
 val MainUiState.hasConfiguredLauncher: Boolean
-    get() = launcherConfig.url.trim().isNotBlank() && launcherConfig.token.trim().isNotBlank()
+    get() = when (launcherMode) {
+        LauncherMode.LOCAL -> localRuntime.isInstalled
+        LauncherMode.REMOTE -> launcherConfig.url.trim().isNotBlank() && launcherConfig.token.trim().isNotBlank()
+    }
+
+const val DEFAULT_LOCAL_LAUNCHER_URL = "http://127.0.0.1:18800"
+const val DEFAULT_LOCAL_LAUNCHER_TOKEN = "ruclaw-local"

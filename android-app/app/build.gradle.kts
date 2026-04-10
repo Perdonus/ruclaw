@@ -10,6 +10,10 @@ val updateRepoOwner = providers.gradleProperty("UPDATE_REPO_OWNER").orNull ?: "P
 val updateRepoName = providers.gradleProperty("UPDATE_REPO_NAME").orNull ?: "ruclaw"
 val updateApkAssetName = providers.gradleProperty("UPDATE_APK_ASSET_NAME").orNull ?: "ruclaw-android-release.apk"
 val updateShaAssetName = providers.gradleProperty("UPDATE_SHA256_ASSET_NAME").orNull ?: "ruclaw-android-release.apk.sha256"
+val generatedRuntimeAssetsDir = providers.environmentVariable("RUCLAW_ANDROID_RUNTIME_ASSETS_DIR")
+    .orNull
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
 val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
 val releaseKeystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
@@ -53,6 +57,14 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    sourceSets {
+        getByName("main") {
+            if (generatedRuntimeAssetsDir != null) {
+                assets.srcDir(generatedRuntimeAssetsDir)
+            }
+        }
     }
 
     buildTypes {
