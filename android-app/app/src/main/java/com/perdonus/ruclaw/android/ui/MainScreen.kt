@@ -176,10 +176,11 @@ fun MainScreen(viewModel: MainViewModel) {
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AnimatedBackdrop(modifier = Modifier.fillMaxSize())
-        StageScrims()
-
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF111823)),
+    ) {
         ConnectedSurface(
             state = state,
             viewModel = viewModel,
@@ -226,7 +227,7 @@ private fun LoadingShell() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0B1017)),
+            .background(Color(0xFF111823)),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -252,7 +253,9 @@ private fun ConnectedSurface(
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = modifier) {
+    BoxWithConstraints(
+        modifier = modifier.background(Color(0xFF111823)),
+    ) {
         val wideLayout = maxWidth >= 980.dp
         if (wideLayout) {
             Row(
@@ -315,9 +318,7 @@ private fun ConnectedSurface(
                     onAddPhoto = onAddPhoto,
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenAgentSheet = onOpenAgentSheet,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
@@ -514,9 +515,7 @@ private fun ChatStage(
     }
 
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(36.dp))
-            .background(Color(0x09000000)),
+        modifier = modifier.background(Color(0xFF111823)),
     ) {
         if (state.messages.isNotEmpty() || state.isHistoryLoading) {
             LazyColumn(
@@ -621,17 +620,17 @@ private fun OverlayFade(
                 Brush.verticalGradient(
                     colors = if (top) {
                         listOf(
-                            Color(0xF20B1017),
-                            Color(0xCC0B1017),
-                            Color(0x7A0B1017),
+                            Color(0xFF111823),
+                            Color(0xE6111823),
+                            Color(0x8C111823),
                             Color.Transparent,
                         )
                     } else {
                         listOf(
                             Color.Transparent,
-                            Color(0x5A0B1017),
-                            Color(0xC20B1017),
-                            Color(0xF20B1017),
+                            Color(0x66111823),
+                            Color(0xD9111823),
+                            Color(0xFF111823),
                         )
                     },
                 ),
