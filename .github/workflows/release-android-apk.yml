@@ -96,22 +96,26 @@ jobs:
 
           log = Path("gradle-release.log")
           lines = log.read_text(errors="ignore").splitlines() if log.exists() else []
-          interesting = []
+          markers = []
           for line in lines:
               stripped = line.strip()
+              lowered = stripped.lower()
               if (
                   stripped.startswith("e: ")
-                  or stripped.startswith("FAILURE:")
-                  or stripped.startswith("* What went wrong:")
-                  or stripped.startswith("Execution failed for task")
-                  or stripped.startswith("> ")
+                  or " what went wrong" in lowered
+                  or "execution failed" in lowered
+                  or "caused by:" in lowered
+                  or "exception" in lowered
+                  or "error:" in lowered
+                  or "aapt" in lowered
+                  or "java heap space" in lowered
+                  or "outofmemory" in lowered
               ):
-                  interesting.append(stripped)
+                  markers.append(stripped)
 
-          if not interesting:
-              interesting = [line.rstrip() for line in lines[-60:]]
+          output = markers[-60:] if markers else [line.rstrip() for line in lines[-120:]]
 
-          for line in interesting[-40:]:
+          for line in output:
               safe = line.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::error::{safe}")
           PY
