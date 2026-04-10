@@ -28,9 +28,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope.weight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope.weight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,7 +50,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -240,6 +241,7 @@ fun MainScreen(viewModel: MainViewModel) {
         SettingsSheet(
             state = state,
             viewModel = viewModel,
+            onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
         )
     }
 
@@ -1116,6 +1118,7 @@ private fun EmptyStage(
 private fun SettingsSheet(
     state: MainUiState,
     viewModel: MainViewModel,
+    onPickGguf: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -1179,7 +1182,7 @@ private fun SettingsSheet(
                     connectionStatus = state.connectionState.status,
                     onInstall = viewModel::installLocalRuntime,
                     onGgufPathChanged = viewModel::onLocalModelPathChanged,
-                    onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
+                    onPickGguf = onPickGguf,
                     onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
                     onLaunch = {
                         viewModel.toggleSettings(false)
