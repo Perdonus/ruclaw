@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -54,11 +55,13 @@ fun MarkdownMessage(
                                 modifier = Modifier.padding(bottom = 6.dp),
                             )
                         }
-                        Text(
-                            text = block.code,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                            color = textColor,
-                        )
+                        SelectionContainer {
+                            Text(
+                                text = block.code,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                color = textColor,
+                            )
+                        }
                     }
                 }
 
@@ -77,32 +80,49 @@ fun MarkdownMessage(
                         TextKind.QUOTE -> baseStyle.copy(color = textColor.copy(alpha = 0.82f))
                         else -> baseStyle.copy(color = textColor)
                     }
-                    ClickableText(
-                        text = block.text,
-                        style = style,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { offset ->
-                            block.text.getStringAnnotations(start = offset, end = offset)
-                                .firstOrNull()
-                                ?.let { annotation ->
-                                    when (annotation.tag) {
-                                        "download" -> onDownloadLinkClick(annotation.item)
-                                        "url" -> onExternalLinkClick(annotation.item)
+                    val hasAnnotations = block.text.getStringAnnotations(
+                        start = 0,
+                        end = block.text.length,
+                    ).isNotEmpty()
+                    if (hasAnnotations) {
+                        ClickableText(
+                            text = block.text,
+                            style = style,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { offset ->
+                                block.text.getStringAnnotations(start = offset, end = offset)
+                                    .firstOrNull()
+                                    ?.let { annotation ->
+                                        when (annotation.tag) {
+                                            "download" -> onDownloadLinkClick(annotation.item)
+                                            "url" -> onExternalLinkClick(annotation.item)
+                                        }
                                     }
-                                }
-                        },
-                    )
+                            },
+                        )
+                    } else {
+                        SelectionContainer {
+                            Text(
+                                text = block.text,
+                                style = style,
+                                overflow = TextOverflow.Visible,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
             }
         }
         if (blocks.isEmpty()) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = textColor,
-                overflow = TextOverflow.Visible,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            SelectionContainer {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = textColor,
+                    overflow = TextOverflow.Visible,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
