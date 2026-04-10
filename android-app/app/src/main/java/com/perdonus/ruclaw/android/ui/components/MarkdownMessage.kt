@@ -13,6 +13,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,6 +27,7 @@ fun MarkdownMessage(
     onDownloadLinkClick: (String) -> Unit,
     onExternalLinkClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
 ) {
     val blocks = remember(text) { MarkdownParser().parse(text) }
     Column(
@@ -55,6 +57,7 @@ fun MarkdownMessage(
                         Text(
                             text = block.code,
                             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                            color = textColor,
                         )
                     }
                 }
@@ -62,13 +65,17 @@ fun MarkdownMessage(
                 MarkdownBlock.Divider -> HorizontalDivider()
 
                 is MarkdownBlock.TextBlock -> {
-                    val style = when (block.kind) {
+                    val baseStyle = when (block.kind) {
                         TextKind.HEADING_1 -> MaterialTheme.typography.headlineSmall
                         TextKind.HEADING_2 -> MaterialTheme.typography.titleLarge
                         TextKind.HEADING_3 -> MaterialTheme.typography.titleMedium
-                        TextKind.QUOTE -> MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextKind.QUOTE -> MaterialTheme.typography.bodyLarge
                         TextKind.BULLET_ITEM -> MaterialTheme.typography.bodyLarge
                         TextKind.PARAGRAPH -> MaterialTheme.typography.bodyLarge
+                    }
+                    val style = when (block.kind) {
+                        TextKind.QUOTE -> baseStyle.copy(color = textColor.copy(alpha = 0.82f))
+                        else -> baseStyle.copy(color = textColor)
                     }
                     ClickableText(
                         text = block.text,
@@ -92,6 +99,7 @@ fun MarkdownMessage(
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyLarge,
+                color = textColor,
                 overflow = TextOverflow.Visible,
                 modifier = Modifier.fillMaxWidth(),
             )

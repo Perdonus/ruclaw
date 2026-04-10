@@ -37,6 +37,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateBottomPadding
+import androidx.compose.foundation.layout.calculateTopPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -52,10 +58,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Send
@@ -126,6 +134,7 @@ fun MainScreen(viewModel: MainViewModel) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val feedbackScope = rememberCoroutineScope()
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -188,6 +197,13 @@ fun MainScreen(viewModel: MainViewModel) {
                 clipboardManager.setText(AnnotatedString(path))
                 viewModel.announceDownloadPath(path)
             },
+            onCopyMessage = { text ->
+                clipboardManager.setText(AnnotatedString(text))
+                feedbackScope.launch {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    snackbarHostState.showSnackbar("Текст скопирован")
+                }
+            },
             onAddPhoto = {
                 photoPicker.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -249,6 +265,7 @@ private fun ConnectedSurface(
     state: MainUiState,
     viewModel: MainViewModel,
     onPathClick: (String) -> Unit,
+    onCopyMessage: (String) -> Unit,
     onAddPhoto: () -> Unit,
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
@@ -276,6 +293,7 @@ private fun ConnectedSurface(
                     state = state,
                     viewModel = viewModel,
                     onPathClick = onPathClick,
+                    onCopyMessage = onCopyMessage,
                     onAddPhoto = onAddPhoto,
                     onOpenDrawer = null,
                     onOpenAgentSheet = onOpenAgentSheet,
@@ -315,6 +333,7 @@ private fun ConnectedSurface(
                     state = state,
                     viewModel = viewModel,
                     onPathClick = onPathClick,
+                    onCopyMessage = onCopyMessage,
                     onAddPhoto = onAddPhoto,
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenAgentSheet = onOpenAgentSheet,
@@ -497,14 +516,15 @@ private fun ChatStage(
     state: MainUiState,
     viewModel: MainViewModel,
     onPathClick: (String) -> Unit,
+    onCopyMessage: (String) -> Unit,
     onAddPhoto: () -> Unit,
     onOpenDrawer: (() -> Unit)?,
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val topPadding = 112.dp
-    val bottomPadding = 186.dp
+    val topPadding = 112.dp + WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomPadding = 186.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     LaunchedEffect(state.activeSessionId, state.messages.size, state.isTyping) {
         val extra = if (state.isTyping) 1 else 0
@@ -534,6 +554,7 @@ private fun ChatStage(
                         message = message,
                         onPathClick = onPathClick,
                         onExternalLink = viewModel::openExternalUrl,
+                        onCopyMessage = onCopyMessage,
                     )
                 }
                 if (state.isTyping) {
@@ -577,9 +598,7 @@ private fun ChatStage(
         )
         OverlayFade(
             top = false,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
 
         TopOverlayBar(
@@ -612,10 +631,16 @@ private fun OverlayFade(
     top: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val insetPadding = if (top) {
+        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    } else {
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(if (top) 188.dp else 220.dp)
+            .height((if (top) 188.dp else 220.dp) + insetPadding)
             .background(
                 Brush.verticalGradient(
                     colors = if (top) {
@@ -643,8 +668,11 @@ private fun MessageBubble(
     message: ChatMessage,
     onPathClick: (String) -> Unit,
     onExternalLink: (String) -> Unit,
+    onCopyMessage: (String) -> Unit,
 ) {
     val isUser = message.role == ChatRole.USER
+    val assistantTextColor = Color(0xFFF4F7FB)
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
@@ -657,6 +685,7 @@ private fun MessageBubble(
                 bottomStart = if (isUser) 24.dp else 10.dp,
             ),
             color = if (isUser) Color(0xFF213042) else Color(0xD9182230),
+            contentColor = if (isUser) Color.White else assistantTextColor,
             border = BorderStroke(1.dp, if (isUser) Color(0x1FFFFFFF) else Color(0x18FFFFFF)),
             modifier = Modifier.widthIn(max = 760.dp),
         ) {
@@ -665,17 +694,40 @@ private fun MessageBubble(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (message.text.isNotBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        FilledIconButton(
+                            onClick = { onCopyMessage(message.text) },
+                            modifier = Modifier.size(34.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (isUser) Color(0xFF32485F) else Color(0xFF243244),
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ContentCopy,
+                                contentDescription = "Скопировать сообщение",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+
                     if (isUser) {
-                        Text(
-                            text = message.text,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = Color.White,
-                        )
+                        SelectionContainer {
+                            Text(
+                                text = message.text,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White,
+                            )
+                        }
                     } else {
                         MarkdownMessage(
                             text = message.text,
                             onDownloadLinkClick = onPathClick,
                             onExternalLinkClick = onExternalLink,
+                            textColor = assistantTextColor,
                         )
                     }
                 }
