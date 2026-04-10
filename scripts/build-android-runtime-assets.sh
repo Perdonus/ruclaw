@@ -29,6 +29,8 @@ rm -f "${runtime_dir}/ruclaw" "${runtime_dir}/ruclaw-launcher"
 
 (
   cd "${repo_root}"
+  go generate ./...
+
   GOOS=android GOARCH=arm64 CGO_ENABLED=0 \
     go build -tags "${common_tags}" -ldflags "${ldflags}" \
     -o "${runtime_dir}/ruclaw" ./cmd/picoclaw
