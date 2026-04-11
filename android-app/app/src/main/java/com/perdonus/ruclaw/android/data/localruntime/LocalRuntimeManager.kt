@@ -99,41 +99,54 @@ class LocalRuntimeManager(context: Context) {
         writeLauncherConfig(workspace.homeDir)
         updateAppConfig(workspace.homeDir, ggufFile)
 
-        modelServerProcess = if (ggufFile != null && modelServerBinary != null) {
-            startProcess(
-                name = "llama-server",
+        val modelServer = if (ggufFile != null && modelServerBinary != null) {
+            if (isModelServerReady()) {
+                AppDiagnostics.log("Reusing existing local llama-server process")
+                null
+            } else {
+                startProcess(
+                    name = "llama-server",
+                    command = listOf(
+                        modelServerBinary.absolutePath,
+                        "-m",
+                        ggufFile.absolutePath,
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "1234",
+                    ),
+                    workspace = workspace,
+                    coreBinary = coreBinary,
+                )
+            }
+        } else {
+            null
+        }
+        modelServerProcess = modelServer?.process
+        if (ggufFile != null) {
+            waitForModelServer(modelServer)
+        }
+
+        if (isLocalLauncherReady()) {
+            AppDiagnostics.log("Reusing existing local RuClaw launcher on $launcherUrl")
+            launcherProcess = null
+        } else {
+            val launcher = startProcess(
+                name = "ruclaw-launcher",
                 command = listOf(
-                    modelServerBinary.absolutePath,
-                    "-m",
-                    ggufFile.absolutePath,
-                    "--host",
-                    "127.0.0.1",
-                    "--port",
-                    "1234",
+                    launcherBinary.absolutePath,
+                    "-no-browser",
+                    "-lang",
+                    "ru",
+                    "-port",
+                    "18800",
                 ),
                 workspace = workspace,
                 coreBinary = coreBinary,
             )
-        } else {
-            null
+            launcherProcess = launcher.process
+            waitForLauncher(launcher)
         }
-        if (ggufFile != null) {
-            waitForModelServer()
-        }
-
-        launcherProcess = startProcess(
-            name = "ruclaw-launcher",
-            command = listOf(
-                launcherBinary.absolutePath,
-                "-no-browser",
-                "-lang",
-                "ru",
-                "-port",
-                "18800",
-            ),
-            workspace = workspace,
-            coreBinary = coreBinary,
-        )
 
         LocalRuntimeConnection(
             launcherUrl = launcherUrl,
@@ -333,7 +346,14 @@ class LocalRuntimeManager(context: Context) {
         ggufFile: File?,
     ) {
         val file = File(homeDir, "config.json")
-        if (!file.exists() && ggufFile == null) {
+        val createdFreshConfig = if (!file.exists()) {
+            file.parentFile?.mkdirs()
+            file.writeText("{}\n")
+            true
+        } else {
+            false
+        }
+        if (ggufFile == null && createdFreshConfig) {
             return
         }
 
@@ -466,19 +486,79 @@ class LocalRuntimeManager(context: Context) {
         return cachedModel
     }
 
-    private suspend fun waitForModelServer() {
+    private suspend fun waitForModelServer(process: ManagedLocalProcess?) {
         var lastError: Throwable? = null
         repeat(120) {
-            runCatching {
-                if (probeHttpReady(localModelApiBase + "/models") || probeHttpReady("http://127.0.0.1:1234/health")) {
-                    return
-                }
-            }.onFailure { error ->
+            val ready = runCatching { isModelServerReady() }.getOrElse { error ->
                 lastError = error
+                false
+            }
+            if (ready) {
+                return
+            }
+            process?.exitCodeOrNull()?.let { code ->
+                throw process.buildStartupFailure(
+                    name = "llama-server",
+                    exitCode = code,
+                    fallback = lastError?.message ?: "Локальная GGUF модель завершилась до готовности.",
+                )
             }
             delay(1000)
         }
-        throw IOException(lastError?.message ?: "Локальная GGUF модель не успела подняться.")
+        throw process?.buildStartupFailure(
+            name = "llama-server",
+            exitCode = process.exitCodeOrNull(),
+            fallback = lastError?.message ?: "Локальная GGUF модель не успела подняться.",
+        ) ?: IOException(lastError?.message ?: "Локальная GGUF модель не успела подняться.")
+    }
+
+    private suspend fun waitForLauncher(process: ManagedLocalProcess) {
+        var lastError: Throwable? = null
+        repeat(24) {
+            val ready = runCatching { isLocalLauncherReady() }.getOrElse { error ->
+                lastError = error
+                false
+            }
+            if (ready) {
+                return
+            }
+
+            process.exitCodeOrNull()?.let { code ->
+                if (process.looksLikePortConflict()) {
+                    repeat(6) {
+                        delay(250)
+                        val conflictedReady = runCatching { isLocalLauncherReady() }.getOrElse { error ->
+                            lastError = error
+                            false
+                        }
+                        if (conflictedReady) {
+                            launcherProcess = null
+                            AppDiagnostics.log("Attached to already running local RuClaw launcher after port conflict")
+                            return
+                        }
+                    }
+                }
+                throw process.buildStartupFailure(
+                    name = "ruclaw-launcher",
+                    exitCode = code,
+                    fallback = lastError?.message ?: "Локальный launcher завершился до готовности.",
+                )
+            }
+            delay(500)
+        }
+        throw process.buildStartupFailure(
+            name = "ruclaw-launcher",
+            exitCode = process.exitCodeOrNull(),
+            fallback = lastError?.message ?: "Локальный launcher не поднялся.",
+        )
+    }
+
+    private fun isModelServerReady(): Boolean {
+        return probeHttpReady(localModelApiBase + "/models") || probeHttpReady("http://127.0.0.1:1234/health")
+    }
+
+    private fun isLocalLauncherReady(): Boolean {
+        return probeAuthorizedReady("$launcherUrl/api/system/launcher-config", launcherToken)
     }
 
     private fun probeHttpReady(url: String): Boolean {
@@ -495,12 +575,30 @@ class LocalRuntimeManager(context: Context) {
         }
     }
 
+    private fun probeAuthorizedReady(
+        url: String,
+        bearerToken: String,
+    ): Boolean {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 1000
+            readTimeout = 1000
+            setRequestProperty("Authorization", "Bearer ${bearerToken.trim()}")
+        }
+        return try {
+            connection.connect()
+            connection.responseCode in 200..299
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun startProcess(
         name: String,
         command: List<String>,
         workspace: LocalRuntimeWorkspace,
         coreBinary: File,
-    ): Process {
+    ): ManagedLocalProcess {
         val process = ProcessBuilder(command)
             .directory(workspace.root)
             .redirectErrorStream(true)
@@ -515,12 +613,10 @@ class LocalRuntimeManager(context: Context) {
             }
             .start()
 
-        watchProcessOutput(name, process)
-        if (process.waitFor(400, TimeUnit.MILLISECONDS)) {
-            throw IOException("$name завершился раньше запуска.")
-        }
-        AppDiagnostics.log("Local runtime process started: $name")
-        return process
+        val recentOutput = RecentProcessOutput()
+        watchProcessOutput(name, process, recentOutput)
+        AppDiagnostics.log("Spawned local runtime process: $name")
+        return ManagedLocalProcess(process, recentOutput)
     }
 
     private fun stopProcess(name: String, process: Process?) {
@@ -540,12 +636,14 @@ class LocalRuntimeManager(context: Context) {
     private fun watchProcessOutput(
         name: String,
         process: Process,
+        recentOutput: RecentProcessOutput,
     ) {
         thread(name = "ruclaw-$name-log", isDaemon = true) {
             runCatching {
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
                         if (line.isNotBlank()) {
+                            recentOutput.add(line)
                             AppDiagnostics.log("$name: $line")
                         }
                     }
@@ -558,6 +656,55 @@ class LocalRuntimeManager(context: Context) {
                 AppDiagnostics.log("$name exited with code $code")
             }
         }
+    }
+
+    private fun ManagedLocalProcess.exitCodeOrNull(): Int? {
+        return if (process.isAlive) {
+            null
+        } else {
+            runCatching { process.exitValue() }.getOrNull()
+        }
+    }
+
+    private fun ManagedLocalProcess.looksLikePortConflict(): Boolean {
+        val haystack = recentOutput.snapshot().joinToString("\n").lowercase()
+        return haystack.contains("address already in use") ||
+            haystack.contains("port already in use") ||
+            haystack.contains("bind: address in use") ||
+            haystack.contains("listen tcp") && haystack.contains("in use")
+    }
+
+    private fun ManagedLocalProcess.buildStartupFailure(
+        name: String,
+        exitCode: Int?,
+        fallback: String,
+    ): IOException {
+        val tail = recentOutput.snapshot()
+        val message = buildString {
+            append(name)
+            if (exitCode != null) {
+                append(" завершился до готовности (exit code ")
+                append(exitCode)
+                append(").")
+            } else {
+                append(" не успел стать готовым.")
+            }
+            if (fallback.isNotBlank()) {
+                append(' ')
+                append(fallback.trim().removeSuffix("."))
+                append('.')
+            }
+            if (tail.isNotEmpty()) {
+                append(" Последние строки:\n")
+                tail.forEachIndexed { index, line ->
+                    if (index > 0) {
+                        append('\n')
+                    }
+                    append(line)
+                }
+            }
+        }
+        return IOException(message)
     }
 
     private fun sanitizeModelId(value: String): String {
@@ -617,3 +764,25 @@ data class LocalRuntimeConnection(
     val runtimeVersion: String,
     val runtimeRoot: String,
 )
+
+private data class ManagedLocalProcess(
+    val process: Process,
+    val recentOutput: RecentProcessOutput,
+)
+
+private class RecentProcessOutput(
+    private val limit: Int = 12,
+) {
+    private val lines = ArrayDeque<String>()
+
+    @Synchronized
+    fun add(line: String) {
+        while (lines.size >= limit) {
+            lines.removeFirst()
+        }
+        lines.addLast(line)
+    }
+
+    @Synchronized
+    fun snapshot(): List<String> = lines.toList()
+}
