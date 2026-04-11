@@ -134,14 +134,14 @@ jobs:
           if-no-files-found: error
 
       - name: Prepare rolling release assets
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p ../release-artifacts
           cp app/build/outputs/apk/debug/app-debug.apk ../release-artifacts/ruclaw-android-debug.apk
           sha256sum ../release-artifacts/ruclaw-android-debug.apk > ../release-artifacts/ruclaw-android-debug.apk.sha256
 
       - name: Publish rolling APK release
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         working-directory: .
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
