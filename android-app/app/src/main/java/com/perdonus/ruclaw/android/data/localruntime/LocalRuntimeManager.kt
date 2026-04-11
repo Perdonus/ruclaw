@@ -163,6 +163,23 @@ class LocalRuntimeManager(context: Context) {
         modelServerProcess = null
     }
 
+    fun hasAllFilesAccess(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+    }
+
+    fun requiresAllFilesAccess(dataDirectory: String): Boolean {
+        val selector = dataDirectory.trim()
+        if (selector.isBlank()) {
+            return false
+        }
+        val root = try {
+            resolveWorkspaceRoot(selector).absoluteFile
+        } catch (_: Throwable) {
+            return false
+        }
+        return requiresAllFilesAccess(root)
+    }
+
     private suspend fun prepareWorkspace(
         dataDirectory: String,
         log: suspend (String) -> Unit,
@@ -195,6 +212,13 @@ class LocalRuntimeManager(context: Context) {
     }
 
     private fun verifyWorkspaceWritable(root: File) {
+        if (requiresAllFilesAccess(root) && !hasAllFilesAccess()) {
+            throw IOException(
+                "Папка данных лежит в общем Android-хранилище: ${root.absolutePath}. " +
+                    "Для Download, Documents и других общих папок локальному RuClaw нужен системный доступ " +
+                    "«Все файлы». Выдай его для RuClaw в настройках Android или очисти поле папки данных.",
+            )
+        }
         if (!root.exists() && !root.mkdirs()) {
             throw IOException("Не удалось создать папку данных: ${root.absolutePath}")
         }
@@ -270,6 +294,49 @@ class LocalRuntimeManager(context: Context) {
             }
         }
         return File("/storage/$volumeId")
+    }
+
+    private fun requiresAllFilesAccess(root: File): Boolean {
+        val target = root.absoluteFile
+        if (isInsideAppOwnedStorage(target)) {
+            return false
+        }
+        if (isSameOrDescendant(target, externalStorageRoot())) {
+            return true
+        }
+        return isSameOrDescendant(target, File("/storage"))
+    }
+
+    private fun isInsideAppOwnedStorage(target: File): Boolean {
+        val appOwnedRoots = buildList {
+            add(File(appContext.applicationInfo.dataDir))
+            add(appContext.filesDir)
+            add(appContext.cacheDir)
+            add(appContext.codeCacheDir)
+            add(appContext.noBackupFilesDir)
+            appContext.getExternalFilesDir(null)?.let(::add)
+            appContext.externalCacheDir?.let(::add)
+            appContext.obbDir?.let(::add)
+            appContext.externalMediaDirs.forEach { mediaDir ->
+                mediaDir?.let(::add)
+            }
+        }
+        return appOwnedRoots.any { root -> isSameOrDescendant(target, root) }
+    }
+
+    private fun isSameOrDescendant(
+        target: File,
+        root: File,
+    ): Boolean {
+        val normalizedTarget = normalizedPath(target)
+        val normalizedRoot = normalizedPath(root)
+        return normalizedTarget == normalizedRoot || normalizedTarget.startsWith("$normalizedRoot/")
+    }
+
+    private fun normalizedPath(file: File): String {
+        return runCatching { file.canonicalPath }
+            .getOrElse { file.absolutePath }
+            .trimEnd('/')
     }
 
     private suspend fun requireBundledBinary(

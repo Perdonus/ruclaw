@@ -200,6 +200,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
+            val dataDirectory = _uiState.value.localRuntime.dataDirectory
+            if (localRuntimeManager.requiresAllFilesAccess(dataDirectory) && !localRuntimeManager.hasAllFilesAccess()) {
+                openAllFilesAccessSettings()
+                showMessage(
+                    "Для выбранной папки Android требует доступ «Все файлы». Сейчас открою системные настройки; после выдачи доступа повтори установку.",
+                )
+                return@launch
+            }
+
             shouldMaintainConnection = false
             reconnectAttempts = 0
             cancelReconnectLoop()
@@ -1005,6 +1014,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(pendingSystemAction = null) }
     }
 
+    private fun openAllFilesAccessSettings() {
+        _uiState.update {
+            it.copy(
+                pendingSystemAction = PendingSystemAction(
+                    type = PendingSystemActionType.OPEN_ALL_FILES_ACCESS_SETTINGS,
+                ),
+            )
+        }
+    }
+
     fun announceDownloadPath(path: String) {
         showMessage("Путь скопирован: $path")
     }
@@ -1036,6 +1055,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     updateConnectionState(ConnectionStatus.DISCONNECTED, null)
                     if (!silent) {
                         showMessage("Сначала нажми «Установить» для локального runtime.")
+                    }
+                    return
+                }
+                if (
+                    localRuntimeManager.requiresAllFilesAccess(localRuntime.dataDirectory) &&
+                    !localRuntimeManager.hasAllFilesAccess()
+                ) {
+                    shouldMaintainConnection = false
+                    updateConnectionState(ConnectionStatus.DISCONNECTED, "Нужен доступ «Все файлы» для выбранной папки.")
+                    openAllFilesAccessSettings()
+                    if (!silent) {
+                        showMessage(
+                            "Для выбранной папки Android требует доступ «Все файлы». Сейчас открою системные настройки; после выдачи доступа повтори запуск локального RuClaw.",
+                        )
                     }
                     return
                 }

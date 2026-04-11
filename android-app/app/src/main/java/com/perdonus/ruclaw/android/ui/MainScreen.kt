@@ -7,6 +7,7 @@ package com.perdonus.ruclaw.android.ui
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -185,24 +186,50 @@ fun MainScreen(viewModel: MainViewModel) {
 
     LaunchedEffect(state.pendingSystemAction) {
         val action = state.pendingSystemAction ?: return@LaunchedEffect
-        val intent = when (action.type) {
+        when (action.type) {
             PendingSystemActionType.OPEN_UNKNOWN_SOURCES_SETTINGS -> {
-                Intent(
+                val intent = Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + context.packageName),
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { context.startActivity(intent) }
+            }
+
+            PendingSystemActionType.OPEN_ALL_FILES_ACCESS_SETTINGS -> {
+                val opened = runCatching {
+                    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Intent(
+                            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:" + context.packageName),
+                        )
+                    } else {
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:" + context.packageName),
+                        )
+                    }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                }.isSuccess
+                if (!opened && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                }
             }
 
             PendingSystemActionType.INSTALL_APK -> {
                 val targetUri = action.uri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-                Intent(Intent.ACTION_VIEW).apply {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(Uri.parse(targetUri), "application/vnd.android.package-archive")
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
+                runCatching { context.startActivity(intent) }
             }
         }
-        runCatching { context.startActivity(intent) }
         viewModel.consumePendingSystemAction()
     }
 
@@ -1418,7 +1445,7 @@ private fun LocalRuntimeSection(
                     text = if (localRuntime.dataDirectory.isBlank()) {
                         "Если оставить пусто, локальный RuClaw использует встроенную папку приложения для данных, кэша, логов и локальных моделей."
                     } else {
-                        "Выбранная папка пойдёт под runtime-данные, кэш, логи и локальные модели. Если Android storage provider не даст прямой файловый путь, установка сразу покажет понятную ошибку."
+                        "Выбранная папка пойдёт под runtime-данные, кэш, логи и локальные модели. Для Download, Documents и других общих папок Android сначала попросит доступ «Все файлы», потом просто повтори установку."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFB8C4D2),

@@ -101,6 +101,7 @@ data class PendingSystemAction(
 
 enum class PendingSystemActionType {
     OPEN_UNKNOWN_SOURCES_SETTINGS,
+    OPEN_ALL_FILES_ACCESS_SETTINGS,
     INSTALL_APK,
 }
 
