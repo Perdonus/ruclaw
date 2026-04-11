@@ -28,7 +28,7 @@ on:
       - ".github/workflows/android-apk.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-android-apk:
@@ -132,3 +132,51 @@ jobs:
           name: ruclaw-android-debug-apk
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Prepare rolling release assets
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p ../release-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk ../release-artifacts/ruclaw-android-debug.apk
+          sha256sum ../release-artifacts/ruclaw-android-debug.apk > ../release-artifacts/ruclaw-android-debug.apk.sha256
+
+      - name: Publish rolling APK release
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          release_tag="android-latest"
+          release_title="Android Latest"
+          release_notes_file="${RUNNER_TEMP}/android-latest-release-notes.md"
+
+          cat > "${release_notes_file}" <<EOF
+          Auto-updated debug APK from `main`.
+
+          Commit: `${GITHUB_SHA}`
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${release_tag}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${release_tag}" --force
+
+          if gh release view "${release_tag}" >/dev/null 2>&1; then
+            gh release edit "${release_tag}" \
+              --title "${release_title}" \
+              --notes-file "${release_notes_file}" \
+              --prerelease
+          else
+            gh release create "${release_tag}" \
+              --title "${release_title}" \
+              --notes-file "${release_notes_file}" \
+              --prerelease
+          fi
+
+          gh release upload "${release_tag}" \
+            release-artifacts/ruclaw-android-debug.apk \
+            release-artifacts/ruclaw-android-debug.apk.sha256 \
+            --clobber
