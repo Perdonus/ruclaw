@@ -62,7 +62,8 @@ android {
     sourceSets {
         getByName("main") {
             if (generatedRuntimeAssetsDir != null) {
-                assets.srcDir(generatedRuntimeAssetsDir)
+                assets.srcDir(file("$generatedRuntimeAssetsDir/assets"))
+                jniLibs.srcDir(file("$generatedRuntimeAssetsDir/jniLibs"))
             }
         }
     }
@@ -87,6 +88,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/LICENSE*"
             excludes += "META-INF/NOTICE*"
+        }
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libruclaw_exec.so"
+            keepDebugSymbols += "**/libruclaw_launcher_exec.so"
+            keepDebugSymbols += "**/libllama_server_exec.so"
         }
     }
 }

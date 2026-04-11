@@ -8,8 +8,9 @@ if [[ -z "${out_root}" ]]; then
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-runtime_dir="${out_root%/}/runtime"
-runtime_lib_dir="${runtime_dir}/lib"
+output_root="${out_root%/}"
+runtime_asset_dir="${output_root}/assets/runtime"
+jni_lib_dir="${output_root}/jniLibs/arm64-v8a"
 llama_cpp_repo="${LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 llama_cpp_ref="${LLAMA_CPP_REF:-b8749}"
 llama_android_platform="${LLAMA_CPP_ANDROID_PLATFORM:-android-28}"
@@ -23,9 +24,8 @@ config_pkg="github.com/Perdonus/ruclaw/pkg/config"
 common_tags="goolm,stdjson"
 ldflags="-X ${config_pkg}.Version=${version} -X ${config_pkg}.GitCommit=${git_commit} -X ${config_pkg}.BuildTime=${build_time} -X ${config_pkg}.GoVersion=${go_version} -s -w"
 
-mkdir -p "${runtime_dir}"
-rm -f "${runtime_dir}/ruclaw" "${runtime_dir}/ruclaw-launcher" "${runtime_dir}/llama-server"
-rm -rf "${runtime_lib_dir}"
+rm -rf "${output_root}/assets" "${output_root}/jniLibs"
+mkdir -p "${runtime_asset_dir}" "${jni_lib_dir}"
 
 if [[ -z "${android_ndk}" && -n "${ANDROID_SDK_ROOT:-}" && -d "${ANDROID_SDK_ROOT}/ndk" ]]; then
   android_ndk="$(find "${ANDROID_SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
@@ -50,12 +50,14 @@ fi
 
   GOOS=android GOARCH=arm64 CGO_ENABLED=0 \
     go build -tags "${common_tags}" -ldflags "${ldflags}" \
-    -o "${runtime_dir}/ruclaw" ./cmd/picoclaw
+    -o "${jni_lib_dir}/libruclaw_exec.so" ./cmd/picoclaw
 
   GOOS=android GOARCH=arm64 CGO_ENABLED=0 \
     go build -tags "${common_tags}" -ldflags "${ldflags}" \
-    -o "${runtime_dir}/ruclaw-launcher" ./web/backend
+    -o "${jni_lib_dir}/libruclaw_launcher_exec.so" ./web/backend
 )
+
+chmod +x "${jni_lib_dir}/libruclaw_exec.so" "${jni_lib_dir}/libruclaw_launcher_exec.so"
 
 llama_work_dir="$(mktemp -d)"
 trap 'rm -rf "${llama_work_dir}"' EXIT
@@ -79,15 +81,14 @@ cmake -S "${llama_work_dir}/llama.cpp" -B "${llama_work_dir}/build-android" \
 
 cmake --build "${llama_work_dir}/build-android" --config Release --target llama-server -j"$(nproc)"
 
-cp "${llama_work_dir}/build-android/bin/llama-server" "${runtime_dir}/llama-server"
-chmod +x "${runtime_dir}/llama-server"
+cp "${llama_work_dir}/build-android/bin/llama-server" "${jni_lib_dir}/libllama_server_exec.so"
+chmod +x "${jni_lib_dir}/libllama_server_exec.so"
 
 while IFS= read -r -d '' shared_lib; do
-  mkdir -p "${runtime_lib_dir}"
-  cp "${shared_lib}" "${runtime_lib_dir}/"
+  cp "${shared_lib}" "${jni_lib_dir}/"
 done < <(find "${llama_work_dir}/build-android" -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
 
-cat > "${runtime_dir}/BUILD_INFO.txt" <<EOF
+cat > "${runtime_asset_dir}/BUILD_INFO.txt" <<EOF
 Version: ${version}
 Commit: ${git_commit}
 BuildTime: ${build_time}
@@ -95,4 +96,4 @@ GoVersion: ${go_version}
 LlamaCppRef: ${llama_cpp_ref}
 EOF
 
-echo "Android runtime assets prepared in ${runtime_dir}"
+echo "Android runtime assets prepared in ${output_root}"

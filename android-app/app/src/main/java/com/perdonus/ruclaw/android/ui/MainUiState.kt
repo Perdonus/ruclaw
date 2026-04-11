@@ -41,6 +41,7 @@ data class LocalRuntimeUiState(
     val runtimeRoot: String = "",
     val launcherUrl: String = DEFAULT_LOCAL_LAUNCHER_URL,
     val launcherToken: String = DEFAULT_LOCAL_LAUNCHER_TOKEN,
+    val dataDirectory: String = "",
     val ggufPath: String = "",
     val keepAliveEnabled: Boolean = true,
     val installState: LocalRuntimeInstallState = LocalRuntimeInstallState.IDLE,

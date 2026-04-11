@@ -36,6 +36,7 @@ import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoHandshake
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoSocket
 import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawApiException
 import com.perdonus.ruclaw.android.data.remote.ruclaw.RuClawLauncherClient
+import com.perdonus.ruclaw.android.data.remote.update.NoPublishedReleaseException
 import com.perdonus.ruclaw.android.data.remote.update.ReleaseFeedClient
 import com.perdonus.ruclaw.android.data.update.ApkDownloadState
 import com.perdonus.ruclaw.android.data.update.ApkUpdateManager
@@ -163,6 +164,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun onLocalDataDirectoryChanged(value: String) {
+        _uiState.update {
+            it.copy(
+                localRuntime = it.localRuntime.copy(dataDirectory = value),
+            )
+        }
+        viewModelScope.launch {
+            localStateRepository.updateLocalRuntime { current ->
+                current.copy(dataDirectory = value.trim())
+            }
+        }
+    }
+
     fun onLocalKeepAliveChanged(enabled: Boolean) {
         _uiState.update {
             it.copy(
@@ -223,7 +237,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             runCatching {
-                localRuntimeManager.install(appendLog)
+                localRuntimeManager.install(
+                    dataDirectory = _uiState.value.localRuntime.dataDirectory,
+                    log = appendLog,
+                )
             }.onSuccess { installation ->
                 localStateRepository.updateLocalRuntime { current ->
                     current.copy(
@@ -834,6 +851,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         showMessage("Обновлений пока нет.")
                     }
                 }
+            } catch (error: NoPublishedReleaseException) {
+                AppDiagnostics.log("Update check: latest release is not published yet")
+                localStateRepository.updateUpdateState { current ->
+                    current.copy(
+                        latestVersionName = "",
+                        releaseTag = "",
+                        releaseUrl = "",
+                        releaseNotes = "",
+                        apkUrl = "",
+                        apkSha256Url = "",
+                        publishedAtEpochMillis = 0L,
+                        lastCheckedAtEpochMillis = System.currentTimeMillis(),
+                        downloadId = null,
+                        downloadedUri = "",
+                        downloadState = PersistedDownloadState.IDLE,
+                    )
+                }
+                applyStoreSnapshot()
+                if (!silent) {
+                    showMessage(error.message ?: "Публичный релиз на GitHub пока не опубликован.")
+                }
             } catch (error: Throwable) {
                 if (error is CancellationException) {
                     throw error
@@ -854,7 +892,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val updateState = _uiState.value.updateState
             if (updateState.apkUrl.isBlank()) {
-                showMessage("В latest release нет APK для Android.")
+                showMessage(
+                    if (updateState.lastCheckedAtEpochMillis > 0L && updateState.latestVersionName.isBlank()) {
+                        "Публичный релиз на GitHub пока не опубликован."
+                    } else {
+                        "В latest release нет APK для Android."
+                    },
+                )
                 return@launch
             }
 
@@ -1000,7 +1044,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     message = if (reconnecting) "Перезапускаю локальный RuClaw…" else "Поднимаю локальный RuClaw…",
                 )
                 val connection = localRuntimeManager.startLocalRuntime(
-                    LocalRuntimeConfig(ggufPath = localRuntime.ggufPath),
+                    LocalRuntimeConfig(
+                        ggufPath = localRuntime.ggufPath,
+                        dataDirectory = localRuntime.dataDirectory,
+                    ),
                 )
                 localStateRepository.updateLocalRuntime { current ->
                     current.copy(
@@ -1593,6 +1640,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runtimeRoot = runtimeRoot,
             launcherUrl = launcherUrl.ifBlank { DEFAULT_LOCAL_LAUNCHER_URL },
             launcherToken = launcherToken.ifBlank { DEFAULT_LOCAL_LAUNCHER_TOKEN },
+            dataDirectory = dataDirectory,
             ggufPath = ggufPath,
             keepAliveEnabled = keepAliveEnabled,
             installState = current?.installState ?: LocalRuntimeInstallState.IDLE,

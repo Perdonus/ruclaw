@@ -76,6 +76,7 @@ data class PersistedLocalRuntimeState(
     val runtimeRoot: String = "",
     val launcherUrl: String = "",
     val launcherToken: String = "",
+    val dataDirectory: String = "",
     val ggufPath: String = "",
     val keepAliveEnabled: Boolean = true,
 )

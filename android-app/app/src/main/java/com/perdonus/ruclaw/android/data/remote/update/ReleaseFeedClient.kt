@@ -28,6 +28,9 @@ class ReleaseFeedClient(
 
         httpClient.newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
+            if (response.code == 404) {
+                throw NoPublishedReleaseException()
+            }
             if (!response.isSuccessful) {
                 throw IOException(body.ifBlank { "GitHub release feed вернул HTTP ${response.code}" })
             }
@@ -56,6 +59,8 @@ class ReleaseFeedClient(
             .getOrDefault(System.currentTimeMillis())
     }
 }
+
+class NoPublishedReleaseException : IOException("Публичный релиз на GitHub пока не опубликован.")
 
 data class ReleaseFeedEntry(
     val tagName: String,

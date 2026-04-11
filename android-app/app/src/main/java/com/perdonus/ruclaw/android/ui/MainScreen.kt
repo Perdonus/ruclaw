@@ -155,6 +155,19 @@ fun MainScreen(viewModel: MainViewModel) {
             viewModel.onLocalModelPathChanged(uri.toString())
         }
     }
+    val dataDirectoryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.onLocalDataDirectoryChanged(uri.toString())
+        }
+    }
 
     LaunchedEffect(state.bannerMessage) {
         state.bannerMessage?.let { message ->
@@ -239,6 +252,7 @@ fun MainScreen(viewModel: MainViewModel) {
         SettingsSheet(
             state = state,
             viewModel = viewModel,
+            onPickDataDirectory = { dataDirectoryPicker.launch(null) },
             onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
         )
     }
@@ -1116,6 +1130,7 @@ private fun EmptyStage(
 private fun SettingsSheet(
     state: MainUiState,
     viewModel: MainViewModel,
+    onPickDataDirectory: () -> Unit,
     onPickGguf: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1179,6 +1194,8 @@ private fun SettingsSheet(
                     localRuntime = state.localRuntime,
                     connectionStatus = state.connectionState.status,
                     onInstall = viewModel::installLocalRuntime,
+                    onDataDirectoryChanged = viewModel::onLocalDataDirectoryChanged,
+                    onPickDataDirectory = onPickDataDirectory,
                     onGgufPathChanged = viewModel::onLocalModelPathChanged,
                     onPickGguf = onPickGguf,
                     onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
@@ -1260,6 +1277,8 @@ private fun LocalRuntimeSection(
     localRuntime: LocalRuntimeUiState,
     connectionStatus: ConnectionStatus,
     onInstall: () -> Unit,
+    onDataDirectoryChanged: (String) -> Unit,
+    onPickDataDirectory: () -> Unit,
     onGgufPathChanged: (String) -> Unit,
     onPickGguf: () -> Unit,
     onKeepAliveChanged: (Boolean) -> Unit,
@@ -1384,6 +1403,39 @@ private fun LocalRuntimeSection(
                 }
 
                 OutlinedTextField(
+                    value = localRuntime.dataDirectory,
+                    onValueChange = onDataDirectoryChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Папка данных runtime") },
+                    placeholder = { Text("Пусто = встроенная папка приложения") },
+                    singleLine = true,
+                    colors = sheetFieldColors(),
+                )
+
+                TextButton(
+                    onClick = onPickDataDirectory,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Выбрать папку")
+                }
+
+                Text(
+                    text = if (localRuntime.dataDirectory.isBlank()) {
+                        "Если оставить пусто, локальный RuClaw использует встроенную папку приложения для данных, кэша, логов и локальных моделей."
+                    } else {
+                        "Выбранная папка пойдёт под runtime-данные, кэш, логи и локальные модели. Если Android storage provider не даст прямой файловый путь, установка сразу покажет понятную ошибку."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB8C4D2),
+                )
+
+                Text(
+                    text = "Сами исполняемые бинарники всё равно запускаются из встроенного Android native runtime, иначе система выдаёт Permission denied.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF8FA1B5),
+                )
+
+                OutlinedTextField(
                     value = localRuntime.ggufPath,
                     onValueChange = onGgufPathChanged,
                     modifier = Modifier.fillMaxWidth(),
@@ -1493,7 +1545,11 @@ private fun UpdateSection(
                 )
                 Text(
                     text = if (updateState.latestVersionName.isBlank()) {
-                        "Latest release ещё не запрашивался"
+                        if (updateState.lastCheckedAtEpochMillis > 0L) {
+                            "Latest release пока не опубликован"
+                        } else {
+                            "Latest release ещё не запрашивался"
+                        }
                     } else {
                         "Latest release: " + updateState.latestVersionName
                     },
@@ -1559,6 +1615,8 @@ private fun updateStatusText(updateState: UpdateUiState): String {
             "Есть свежая версия " + updateState.latestVersionName + "."
         updateState.latestVersionName.isNotBlank() ->
             "У тебя уже актуальная версия."
+        updateState.lastCheckedAtEpochMillis > 0L ->
+            "Публичный релиз на GitHub пока не опубликован."
         else -> "Пока не проверял релизный канал."
     }
 }

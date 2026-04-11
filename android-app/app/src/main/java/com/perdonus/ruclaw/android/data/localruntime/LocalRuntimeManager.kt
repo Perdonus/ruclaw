@@ -3,6 +3,9 @@ package com.perdonus.ruclaw.android.data.localruntime
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.os.storage.StorageManager
+import android.provider.DocumentsContract
 import com.perdonus.ruclaw.android.BuildConfig
 import com.perdonus.ruclaw.android.core.util.AppDiagnostics
 import java.io.File
@@ -29,13 +32,10 @@ import kotlinx.serialization.json.jsonPrimitive
 
 class LocalRuntimeManager(context: Context) {
     private val appContext = context.applicationContext
-    private val runtimeRoot = File(appContext.filesDir, "local-runtime")
-    private val binDir = File(runtimeRoot, "bin")
-    private val libDir = File(runtimeRoot, "lib")
-    private val homeDir = File(runtimeRoot, "home")
-    private val logsDir = File(runtimeRoot, "logs")
-    private val modelsDir = File(runtimeRoot, "models")
-    private val tmpDir = File(runtimeRoot, "tmp")
+    private val defaultRuntimeRoot = File(appContext.filesDir, "local-runtime")
+    private val nativeLibDir = appContext.applicationInfo.nativeLibraryDir
+        ?.let(::File)
+        ?: File(appContext.applicationInfo.dataDir, "lib")
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -47,33 +47,25 @@ class LocalRuntimeManager(context: Context) {
     @Volatile
     private var modelServerProcess: Process? = null
 
-    suspend fun install(log: suspend (String) -> Unit): LocalRuntimeInstallation = withContext(Dispatchers.IO) {
+    suspend fun install(
+        dataDirectory: String,
+        log: suspend (String) -> Unit,
+    ): LocalRuntimeInstallation = withContext(Dispatchers.IO) {
         ensureSupportedAndroidVersion()
-        log("Готовлю sandbox для локального RuClaw…")
-        runtimeRoot.mkdirs()
-        binDir.mkdirs()
-        libDir.deleteRecursively()
-        libDir.mkdirs()
-        homeDir.mkdirs()
-        logsDir.mkdirs()
-        modelsDir.mkdirs()
-        tmpDir.mkdirs()
+        val workspace = prepareWorkspace(dataDirectory, log)
 
-        val coreBinary = extractBundledBinary(coreBinaryAssetName, File(binDir, coreBinaryAssetName), log)
-        val launcherBinary = extractBundledBinary(launcherBinaryAssetName, File(binDir, launcherBinaryAssetName), log)
-        val modelServerBinary = extractOptionalBundledBinary(
-            modelServerAssetName,
-            File(binDir, modelServerAssetName),
-            log,
-        )
-        extractOptionalBundledDirectory("$assetDir/lib", libDir, log)
+        log("Проверяю встроенные бинарники Android runtime…")
+        val coreBinary = requireBundledBinary(coreBinaryLibraryFileName, log)
+        val launcherBinary = requireBundledBinary(launcherBinaryLibraryFileName, log)
+        val modelServerBinary = requireOptionalBundledBinary(modelServerLibraryFileName, log)
+        writeBundledBuildInfo(workspace, log)
 
-        File(runtimeRoot, "VERSION.txt").writeText(BuildConfig.VERSION_NAME + "\n")
+        File(workspace.root, "VERSION.txt").writeText(BuildConfig.VERSION_NAME + "\n")
         log("Локальный runtime готов.")
 
         LocalRuntimeInstallation(
             runtimeVersion = BuildConfig.VERSION_NAME,
-            runtimeRoot = runtimeRoot.absolutePath,
+            runtimeRoot = workspace.root.absolutePath,
             launcherUrl = launcherUrl,
             launcherToken = launcherToken,
             coreBinaryPath = coreBinary.absolutePath,
@@ -84,20 +76,19 @@ class LocalRuntimeManager(context: Context) {
 
     suspend fun startLocalRuntime(config: LocalRuntimeConfig): LocalRuntimeConnection = withContext(Dispatchers.IO) {
         ensureSupportedAndroidVersion()
-        val ggufFile = config.ggufPath.trim().takeIf { it.isNotBlank() }?.let(::resolveGgufFile)
+        val workspace = resolveWorkspace(config.dataDirectory)
+        ensureWorkspaceDirectories(workspace)
+        verifyWorkspaceWritable(workspace.root)
 
-        val coreBinary = File(binDir, coreBinaryAssetName)
-        val launcherBinary = File(binDir, launcherBinaryAssetName)
-        val modelServerBinary = File(binDir, modelServerAssetName)
-        val required = buildList {
-            add(coreBinary)
-            add(launcherBinary)
-        }
-        val missing = required.firstOrNull { !it.exists() || !it.canExecute() }
-        if (missing != null) {
-            throw IOException("Локальный runtime не установлен полностью. Сначала нажми «Установить».")
-        }
-        if (ggufFile != null && (!modelServerBinary.exists() || !modelServerBinary.canExecute())) {
+        val ggufFile = config.ggufPath.trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { resolveGgufFile(it, workspace.modelsDir) }
+
+        val coreBinary = requireInstalledBinary(coreBinaryLibraryFileName)
+        val launcherBinary = requireInstalledBinary(launcherBinaryLibraryFileName)
+        val modelServerBinary = resolveInstalledBinary(modelServerLibraryFileName)
+
+        if (ggufFile != null && modelServerBinary == null) {
             throw IOException(
                 "В этом APK нет локального model server для GGUF. " +
                     "Либо очисти путь до GGUF, либо поставь Android-релиз с bundled llama-server.",
@@ -105,10 +96,10 @@ class LocalRuntimeManager(context: Context) {
         }
 
         stopLocalRuntime()
-        writeLauncherConfig()
-        updateAppConfig(ggufFile)
+        writeLauncherConfig(workspace.homeDir)
+        updateAppConfig(workspace.homeDir, ggufFile)
 
-        modelServerProcess = if (ggufFile != null) {
+        modelServerProcess = if (ggufFile != null && modelServerBinary != null) {
             startProcess(
                 name = "llama-server",
                 command = listOf(
@@ -120,6 +111,8 @@ class LocalRuntimeManager(context: Context) {
                     "--port",
                     "1234",
                 ),
+                workspace = workspace,
+                coreBinary = coreBinary,
             )
         } else {
             null
@@ -138,13 +131,15 @@ class LocalRuntimeManager(context: Context) {
                 "-port",
                 "18800",
             ),
+            workspace = workspace,
+            coreBinary = coreBinary,
         )
 
         LocalRuntimeConnection(
             launcherUrl = launcherUrl,
             launcherToken = launcherToken,
             runtimeVersion = BuildConfig.VERSION_NAME,
-            runtimeRoot = runtimeRoot.absolutePath,
+            runtimeRoot = workspace.root.absolutePath,
         )
     }
 
@@ -155,69 +150,172 @@ class LocalRuntimeManager(context: Context) {
         modelServerProcess = null
     }
 
-    private suspend fun extractBundledBinary(
-        assetName: String,
-        target: File,
+    private suspend fun prepareWorkspace(
+        dataDirectory: String,
         log: suspend (String) -> Unit,
-    ): File {
-        log("Распаковываю $assetName…")
-        try {
-            appContext.assets.open("$assetDir/$assetName").use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            }
-        } catch (error: FileNotFoundException) {
-            throw IOException(
-                "В этом APK нет встроенного локального runtime ($assetName). " +
-                    "Нужен релиз Android с bundled local binaries.",
-            )
-        }
-        target.setReadable(true, true)
-        target.setWritable(true, true)
-        if (!target.setExecutable(true, true)) {
-            throw IOException("Не удалось выставить флаг запуска для ${target.name}")
-        }
-        return target
+    ): LocalRuntimeWorkspace {
+        val workspace = resolveWorkspace(dataDirectory)
+        log("Готовлю папку данных локального RuClaw…")
+        log("Путь: ${workspace.root.absolutePath}")
+        ensureWorkspaceDirectories(workspace)
+        verifyWorkspaceWritable(workspace.root)
+        return workspace
     }
 
-    private suspend fun extractOptionalBundledBinary(
-        assetName: String,
-        target: File,
+    private fun resolveWorkspace(dataDirectory: String): LocalRuntimeWorkspace {
+        val root = resolveWorkspaceRoot(dataDirectory).absoluteFile
+        return LocalRuntimeWorkspace(
+            root = root,
+            homeDir = File(root, "home"),
+            logsDir = File(root, "logs"),
+            modelsDir = File(root, "models"),
+            tmpDir = File(root, "tmp"),
+        )
+    }
+
+    private fun ensureWorkspaceDirectories(workspace: LocalRuntimeWorkspace) {
+        workspace.root.mkdirs()
+        workspace.homeDir.mkdirs()
+        workspace.logsDir.mkdirs()
+        workspace.modelsDir.mkdirs()
+        workspace.tmpDir.mkdirs()
+    }
+
+    private fun verifyWorkspaceWritable(root: File) {
+        if (!root.exists() && !root.mkdirs()) {
+            throw IOException("Не удалось создать папку данных: ${root.absolutePath}")
+        }
+        if (!root.isDirectory) {
+            throw IOException("Папка данных не похожа на каталог: ${root.absolutePath}")
+        }
+
+        val probe = File(root, ".ruclaw-write-test")
+        runCatching {
+            probe.writeText("ok\n")
+            probe.delete()
+        }.getOrElse { error ->
+            throw IOException(
+                "Выбранная папка недоступна для прямой записи: ${root.absolutePath}. " +
+                    "Выбери обычную папку во внутреннем накопителе устройства или оставь встроенную.",
+                error,
+            )
+        }
+    }
+
+    private fun resolveWorkspaceRoot(dataDirectory: String): File {
+        val selector = dataDirectory.trim()
+        if (selector.isBlank()) {
+            return defaultRuntimeRoot
+        }
+        if (selector.startsWith("content://", ignoreCase = true)) {
+            return resolveTreeUriToFile(Uri.parse(selector))
+        }
+        return File(selector)
+    }
+
+    private fun resolveTreeUriToFile(uri: Uri): File {
+        if (!DocumentsContract.isTreeUri(uri)) {
+            throw IOException("Android picker вернул не папку, а другой URI.")
+        }
+        val authority = uri.authority.orEmpty()
+        if (authority != externalStorageDocumentsAuthority) {
+            throw IOException(
+                "Этот Android storage provider не даёт прямой файловый путь для local runtime. " +
+                    "Выбери папку во внутреннем накопителе устройства.",
+            )
+        }
+
+        val documentId = DocumentsContract.getTreeDocumentId(uri)
+        if (documentId.startsWith("raw:", ignoreCase = true)) {
+            return File(documentId.removePrefix("raw:"))
+        }
+
+        val volumeId = documentId.substringBefore(':')
+        val relativePath = documentId.substringAfter(':', "")
+        val volumeRoot = when {
+            volumeId.equals("primary", ignoreCase = true) -> externalStorageRoot()
+            volumeId.equals("home", ignoreCase = true) -> File(externalStorageRoot(), "Documents")
+            else -> resolveStorageVolumeRoot(volumeId)
+        }
+        return if (relativePath.isBlank()) {
+            volumeRoot
+        } else {
+            File(volumeRoot, relativePath)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun externalStorageRoot(): File = Environment.getExternalStorageDirectory()
+
+    private fun resolveStorageVolumeRoot(volumeId: String): File {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val manager = appContext.getSystemService(StorageManager::class.java)
+            val volume = manager?.storageVolumes?.firstOrNull { it.uuid.equals(volumeId, ignoreCase = true) }
+            val directory = volume?.directory
+            if (directory != null) {
+                return directory
+            }
+        }
+        return File("/storage/$volumeId")
+    }
+
+    private suspend fun requireBundledBinary(
+        libraryFileName: String,
+        log: suspend (String) -> Unit,
+    ): File {
+        val file = requireInstalledBinary(libraryFileName)
+        log("Подключаю ${file.name} из native libs…")
+        return file
+    }
+
+    private suspend fun requireOptionalBundledBinary(
+        libraryFileName: String,
         log: suspend (String) -> Unit,
     ): File? {
-        return try {
-            extractBundledBinary(assetName, target, log)
-        } catch (_: IOException) {
-            runCatching { target.delete() }
-            log("Пропускаю $assetName: локальный GGUF останется опциональным.")
+        val file = resolveInstalledBinary(libraryFileName)
+        return if (file != null) {
+            log("Подключаю ${file.name} из native libs…")
+            file
+        } else {
+            log("Пропускаю ${libraryFileName.removePrefix("lib").removeSuffix(".so")}: GGUF останется опциональным.")
             null
         }
     }
 
-    private suspend fun extractOptionalBundledDirectory(
-        assetPath: String,
-        targetDir: File,
+    private fun requireInstalledBinary(libraryFileName: String): File {
+        return resolveInstalledBinary(libraryFileName)
+            ?: throw IOException(
+                "В этом APK нет встроенного локального runtime ($libraryFileName). " +
+                    "Нужен Android-релиз с bundled native runtime.",
+            )
+    }
+
+    private fun resolveInstalledBinary(libraryFileName: String): File? {
+        val binary = File(nativeLibDir, libraryFileName)
+        if (!binary.exists()) {
+            return null
+        }
+        binary.setReadable(true, false)
+        binary.setExecutable(true, false)
+        return binary
+    }
+
+    private suspend fun writeBundledBuildInfo(
+        workspace: LocalRuntimeWorkspace,
         log: suspend (String) -> Unit,
     ) {
-        val entries = appContext.assets.list(assetPath).orEmpty()
-        if (entries.isEmpty()) {
-            return
-        }
-        targetDir.mkdirs()
-        entries.forEach { name ->
-            val target = File(targetDir, name)
-            log("Распаковываю ${target.relativeTo(runtimeRoot).path}…")
-            appContext.assets.open("$assetPath/$name").use { input ->
+        val target = File(workspace.root, buildInfoAssetName)
+        try {
+            appContext.assets.open("$assetDir/$buildInfoAssetName").use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             }
-            target.setReadable(true, true)
-            target.setWritable(true, true)
-            if (name.endsWith(".so")) {
-                target.setExecutable(true, true)
-            }
+            log("Сохраняю $buildInfoAssetName…")
+        } catch (_: FileNotFoundException) {
+            // Older APKs may not bundle build info.
         }
     }
 
-    private fun writeLauncherConfig() {
+    private fun writeLauncherConfig(homeDir: File) {
         val file = File(homeDir, "launcher-config.json")
         file.writeText(
             """
@@ -230,7 +328,10 @@ class LocalRuntimeManager(context: Context) {
         )
     }
 
-    private fun updateAppConfig(ggufFile: File?) {
+    private fun updateAppConfig(
+        homeDir: File,
+        ggufFile: File?,
+    ) {
         val file = File(homeDir, "config.json")
         if (!file.exists() && ggufFile == null) {
             return
@@ -325,9 +426,12 @@ class LocalRuntimeManager(context: Context) {
         file.writeText(json.encodeToString(nextRoot) + "\n")
     }
 
-    private fun resolveGgufFile(pathOrUri: String): File {
+    private fun resolveGgufFile(
+        pathOrUri: String,
+        modelsDir: File,
+    ): File {
         return if (pathOrUri.startsWith("content://", ignoreCase = true)) {
-            materializeGgufUri(Uri.parse(pathOrUri))
+            materializeGgufUri(Uri.parse(pathOrUri), modelsDir)
         } else {
             File(pathOrUri).also { file ->
                 if (!file.exists() || !file.isFile) {
@@ -337,7 +441,10 @@ class LocalRuntimeManager(context: Context) {
         }
     }
 
-    private fun materializeGgufUri(uri: Uri): File {
+    private fun materializeGgufUri(
+        uri: Uri,
+        modelsDir: File,
+    ): File {
         modelsDir.mkdirs()
         val cachedModel = File(modelsDir, "selected-model.gguf")
         val sourceMarker = File(modelsDir, "selected-model.uri")
@@ -391,20 +498,20 @@ class LocalRuntimeManager(context: Context) {
     private fun startProcess(
         name: String,
         command: List<String>,
+        workspace: LocalRuntimeWorkspace,
+        coreBinary: File,
     ): Process {
         val process = ProcessBuilder(command)
-            .directory(runtimeRoot)
+            .directory(workspace.root)
             .redirectErrorStream(true)
             .apply {
-                environment()["HOME"] = homeDir.absolutePath
-                environment()["TMPDIR"] = tmpDir.absolutePath
-                environment()["PICOCLAW_HOME"] = homeDir.absolutePath
-                environment()["PICOCLAW_CONFIG"] = File(homeDir, "config.json").absolutePath
-                environment()["PICOCLAW_BINARY"] = File(binDir, coreBinaryAssetName).absolutePath
+                environment()["HOME"] = workspace.homeDir.absolutePath
+                environment()["TMPDIR"] = workspace.tmpDir.absolutePath
+                environment()["PICOCLAW_HOME"] = workspace.homeDir.absolutePath
+                environment()["PICOCLAW_CONFIG"] = File(workspace.homeDir, "config.json").absolutePath
+                environment()["PICOCLAW_BINARY"] = coreBinary.absolutePath
                 environment()["PICOCLAW_LAUNCHER_TOKEN"] = launcherToken
-                if (libDir.exists() && !libDir.listFiles().isNullOrEmpty()) {
-                    environment()["LD_LIBRARY_PATH"] = libDir.absolutePath
-                }
+                environment()["LD_LIBRARY_PATH"] = nativeLibDir.absolutePath
             }
             .start()
 
@@ -470,14 +577,24 @@ class LocalRuntimeManager(context: Context) {
         const val launcherToken = "ruclaw-local"
 
         private const val assetDir = "runtime"
-        private const val coreBinaryAssetName = "ruclaw"
-        private const val launcherBinaryAssetName = "ruclaw-launcher"
-        private const val modelServerAssetName = "llama-server"
+        private const val buildInfoAssetName = "BUILD_INFO.txt"
+        private const val coreBinaryLibraryFileName = "libruclaw_exec.so"
+        private const val launcherBinaryLibraryFileName = "libruclaw_launcher_exec.so"
+        private const val modelServerLibraryFileName = "libllama_server_exec.so"
         private const val localModelName = "local-gguf"
         private const val localModelApiBase = "http://127.0.0.1:1234/v1"
         private const val minimumLocalRuntimeSdk = 28
+        private const val externalStorageDocumentsAuthority = "com.android.externalstorage.documents"
     }
 }
+
+private data class LocalRuntimeWorkspace(
+    val root: File,
+    val homeDir: File,
+    val logsDir: File,
+    val modelsDir: File,
+    val tmpDir: File,
+)
 
 data class LocalRuntimeInstallation(
     val runtimeVersion: String,
@@ -491,6 +608,7 @@ data class LocalRuntimeInstallation(
 
 data class LocalRuntimeConfig(
     val ggufPath: String,
+    val dataDirectory: String,
 )
 
 data class LocalRuntimeConnection(
