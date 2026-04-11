@@ -253,7 +253,6 @@ fun MainScreen(viewModel: MainViewModel) {
             state = state,
             viewModel = viewModel,
             onPickDataDirectory = { dataDirectoryPicker.launch(null) },
-            onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
         )
     }
 
@@ -262,6 +261,7 @@ fun MainScreen(viewModel: MainViewModel) {
             state = state,
             viewModel = viewModel,
             onNewSession = viewModel::newSession,
+            onPickGguf = { ggufPicker.launch(arrayOf("*/*")) },
         )
     }
 }
@@ -1131,7 +1131,6 @@ private fun SettingsSheet(
     state: MainUiState,
     viewModel: MainViewModel,
     onPickDataDirectory: () -> Unit,
-    onPickGguf: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -1196,8 +1195,6 @@ private fun SettingsSheet(
                     onInstall = viewModel::installLocalRuntime,
                     onDataDirectoryChanged = viewModel::onLocalDataDirectoryChanged,
                     onPickDataDirectory = onPickDataDirectory,
-                    onGgufPathChanged = viewModel::onLocalModelPathChanged,
-                    onPickGguf = onPickGguf,
                     onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
                     onLaunch = {
                         viewModel.toggleSettings(false)
@@ -1279,8 +1276,6 @@ private fun LocalRuntimeSection(
     onInstall: () -> Unit,
     onDataDirectoryChanged: (String) -> Unit,
     onPickDataDirectory: () -> Unit,
-    onGgufPathChanged: (String) -> Unit,
-    onPickGguf: () -> Unit,
     onKeepAliveChanged: (Boolean) -> Unit,
     onLaunch: () -> Unit,
 ) {
@@ -1433,29 +1428,6 @@ private fun LocalRuntimeSection(
                     text = "Сами исполняемые бинарники всё равно запускаются из встроенного Android native runtime, иначе система выдаёт Permission denied.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF8FA1B5),
-                )
-
-                OutlinedTextField(
-                    value = localRuntime.ggufPath,
-                    onValueChange = onGgufPathChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Путь до GGUF") },
-                    placeholder = { Text("/storage/emulated/0/Download/model.gguf или content://...") },
-                    singleLine = true,
-                    colors = sheetFieldColors(),
-                )
-
-                TextButton(
-                    onClick = onPickGguf,
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text("Выбрать GGUF")
-                }
-
-                Text(
-                    text = "GGUF модель опциональна. Можно вставить путь вручную или выбрать файл через системный picker. Если путь указан, я автоматически подниму локальный model server и добавлю модель в локальный RuClaw.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB8C4D2),
                 )
 
                 Surface(

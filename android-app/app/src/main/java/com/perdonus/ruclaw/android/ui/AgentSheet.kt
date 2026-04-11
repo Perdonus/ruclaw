@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.LauncherModelItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
@@ -53,9 +54,11 @@ fun AgentSheet(
     state: MainUiState,
     viewModel: MainViewModel,
     onNewSession: () -> Unit,
+    onPickGguf: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val catalog = state.launcherCatalog
+    val canConfigureLocalModels = state.launcherMode == LauncherMode.LOCAL && state.localRuntime.isInstalled
 
     ModalBottomSheet(
         onDismissRequest = { viewModel.toggleAgentSheet(false) },
@@ -83,10 +86,10 @@ fun AgentSheet(
                 Text("Новый диалог")
             }
 
-            if (!state.hasConfiguredLauncher) {
+            if (!state.hasConfiguredLauncher && !canConfigureLocalModels) {
                 SectionCard {
                     Text(
-                        text = if (state.launcherMode == com.perdonus.ruclaw.android.core.model.LauncherMode.LOCAL) {
+                        text = if (state.launcherMode == LauncherMode.LOCAL) {
                             "Сначала установи и запусти локальный RuClaw в настройках."
                         } else {
                             "Сначала укажи launcher URL и access token в настройках."
@@ -98,19 +101,34 @@ fun AgentSheet(
             } else {
                 ModelsSection(
                     catalog = catalog,
+                    launcherMode = state.launcherMode,
+                    localRuntime = state.localRuntime,
+                    launcherReady = state.hasConfiguredLauncher,
                     onSelectModel = viewModel::setDefaultLauncherModel,
+                    onLocalModelPathChanged = viewModel::onLocalModelPathChanged,
+                    onPickGguf = onPickGguf,
                 )
-                SkillsSection(
-                    catalog = catalog,
-                    onSearchQueryChanged = viewModel::onSkillSearchQueryChanged,
-                    onSearch = viewModel::searchLauncherSkills,
-                    onInstall = viewModel::installLauncherSkill,
-                    onUse = viewModel::useLauncherSkill,
-                )
-                ToolsSection(
-                    catalog = catalog,
-                    onToggleTool = viewModel::toggleLauncherTool,
-                )
+                if (state.hasConfiguredLauncher) {
+                    SkillsSection(
+                        catalog = catalog,
+                        onSearchQueryChanged = viewModel::onSkillSearchQueryChanged,
+                        onSearch = viewModel::searchLauncherSkills,
+                        onInstall = viewModel::installLauncherSkill,
+                        onUse = viewModel::useLauncherSkill,
+                    )
+                    ToolsSection(
+                        catalog = catalog,
+                        onToggleTool = viewModel::toggleLauncherTool,
+                    )
+                } else if (canConfigureLocalModels) {
+                    SectionCard {
+                        Text(
+                            text = "Локальный launcher ещё не поднят. GGUF можно выбрать уже сейчас, а сетевые модели, навыки и тулы подтянутся после запуска.",
+                            color = Color(0xFFB8C4D2),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -121,26 +139,43 @@ fun AgentSheet(
 @Composable
 private fun ModelsSection(
     catalog: LauncherCatalogState,
+    launcherMode: LauncherMode,
+    localRuntime: LocalRuntimeUiState,
+    launcherReady: Boolean,
     onSelectModel: (String) -> Unit,
+    onLocalModelPathChanged: (String) -> Unit,
+    onPickGguf: () -> Unit,
 ) {
-    val models = catalog.models.filterNot { it.isVirtual }
+    val models = if (launcherReady) {
+        catalog.models.filterNot { it.isVirtual }
+    } else {
+        emptyList()
+    }
 
     SectionHeader(
         title = "Модели",
-        subtitle = "Глобальный выбор модели по умолчанию для launcher.",
+        subtitle = if (launcherMode == LauncherMode.LOCAL) {
+            "Сетевые модели launcher и опциональная локальная GGUF внизу списка."
+        } else {
+            "Глобальный выбор модели по умолчанию для launcher."
+        },
     )
     SectionCard {
-        when {
-            catalog.isLoading && models.isEmpty() -> {
-                SectionLoading("Подгружаю модели…")
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            when {
+                launcherReady && catalog.isLoading && models.isEmpty() -> {
+                    SectionLoading("Подгружаю модели…")
+                }
 
-            models.isEmpty() -> {
-                EmptySectionText("Модели пока не подтянулись.")
-            }
+                launcherReady && models.isEmpty() -> {
+                    EmptySectionText("Модели пока не подтянулись.")
+                }
 
-            else -> {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                launcherMode == LauncherMode.LOCAL && !launcherReady -> {
+                    EmptySectionText("Локальный launcher ещё не поднят. GGUF можно выбрать уже сейчас.")
+                }
+
+                else -> {
                     models.forEach { model ->
                         ModelRow(
                             model = model,
@@ -148,6 +183,64 @@ private fun ModelsSection(
                             onClick = { onSelectModel(model.modelName) },
                         )
                     }
+                }
+            }
+
+            if (launcherMode == LauncherMode.LOCAL) {
+                if (models.isNotEmpty() || launcherReady) {
+                    HorizontalDivider(color = Color(0x14FFFFFF))
+                }
+                LocalGgufModelCard(
+                    ggufPath = localRuntime.ggufPath,
+                    onGgufPathChanged = onLocalModelPathChanged,
+                    onPickGguf = onPickGguf,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalGgufModelCard(
+    ggufPath: String,
+    onGgufPathChanged: (String) -> Unit,
+    onPickGguf: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0x80182331),
+        border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Локальная GGUF модель",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "Опционально. Файл можно выбрать заранее, а приложение само поднимет локальный model server.",
+                color = Color(0xFFB8C4D2),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            OutlinedTextField(
+                value = ggufPath,
+                onValueChange = onGgufPathChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Путь до GGUF") },
+                placeholder = { Text("/storage/emulated/0/Download/model.gguf или content://...") },
+                singleLine = true,
+                colors = agentFieldColors(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onPickGguf) {
+                    Text(if (ggufPath.isBlank()) "Выбрать GGUF" else "Заменить GGUF")
                 }
             }
         }
