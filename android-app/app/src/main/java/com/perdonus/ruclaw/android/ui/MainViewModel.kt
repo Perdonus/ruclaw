@@ -1,9 +1,13 @@
 package com.perdonus.ruclaw.android.ui
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.util.Base64
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.perdonus.ruclaw.android.BuildConfig
@@ -30,7 +34,9 @@ import com.perdonus.ruclaw.android.core.model.PersistedUpdateState
 import com.perdonus.ruclaw.android.core.util.AppDiagnostics
 import com.perdonus.ruclaw.android.data.local.LocalStateRepository
 import com.perdonus.ruclaw.android.data.localruntime.LocalRuntimeConfig
+import com.perdonus.ruclaw.android.data.localruntime.LocalRuntimeConnection
 import com.perdonus.ruclaw.android.data.localruntime.LocalRuntimeManager
+import com.perdonus.ruclaw.android.data.localruntime.LocalTelegramConfig
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoEvent
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoHandshake
 import com.perdonus.ruclaw.android.data.remote.ruclaw.PicoSocket
@@ -41,6 +47,9 @@ import com.perdonus.ruclaw.android.data.remote.update.ReleaseFeedClient
 import com.perdonus.ruclaw.android.data.update.ApkDownloadState
 import com.perdonus.ruclaw.android.data.update.ApkUpdateManager
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
@@ -80,6 +89,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var cachedHandshake: PicoHandshake? = null
     private var isCheckingUpdates = false
     private var downloadProgressPercent: Int? = null
+    private var pendingKeepAliveEnable = false
 
     init {
         viewModelScope.launch {
@@ -87,36 +97,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val cachedSession = persisted.activeSessionId?.let { id ->
                 persisted.cachedSessions.firstOrNull { it.sessionId == id }
             }
+            if (persisted.launcherMode != LauncherMode.LOCAL) {
+                localStateRepository.saveLauncherMode(LauncherMode.LOCAL)
+            }
             _uiState.update {
                 it.copy(
                     isLoaded = true,
-                    launcherMode = persisted.launcherMode,
+                    launcherMode = LauncherMode.LOCAL,
                     launcherConfig = LauncherConfigDraft(
-                        url = persisted.launcherUrl.ifBlank { BuildConfig.DEFAULT_LAUNCHER_URL },
+                        url = persisted.launcherUrl.ifBlank { DEFAULT_LOCAL_LAUNCHER_URL },
                         token = persisted.launcherToken,
                     ),
                     localRuntime = persisted.localRuntime.toUiState(),
                     threads = persisted.threads,
                     activeSessionId = persisted.activeSessionId,
                     messages = cachedSession?.messages ?: emptyList(),
+                    hasNotificationPermission = SessionKeepAliveService.hasNotificationPermission(getApplication()),
                     updateState = persisted.updateState.toUiState(),
                     diagnostics = AppDiagnostics.snapshot(),
                 )
             }
             refreshUpdateFromSystem(showFailureMessage = false)
             checkForUpdates(silent = true)
-            if (
-                persisted.launcherMode == LauncherMode.REMOTE &&
-                persisted.launcherUrl.isNotBlank() &&
-                persisted.launcherToken.isNotBlank()
-            ) {
+            if (persisted.localRuntime.isInstalled) {
                 launchConnectionTask {
                     connectLauncherInternal(silent = true, reconnecting = false)
                 }
             }
         }
     }
-
     fun onLauncherUrlChanged(value: String) {
         _uiState.update {
             it.copy(
@@ -178,6 +187,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onLocalKeepAliveChanged(enabled: Boolean) {
+        if (enabled && !_uiState.value.hasNotificationPermission) {
+            pendingKeepAliveEnable = true
+            requestNotificationPermission()
+            showMessage("Разреши уведомления, чтобы keep alive удерживал локальный RuClaw в фоне.")
+            return
+        }
+
+        pendingKeepAliveEnable = false
         _uiState.update {
             it.copy(
                 localRuntime = it.localRuntime.copy(keepAliveEnabled = enabled),
@@ -191,6 +208,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val status = _uiState.value.connectionState
                 updateConnectionState(status.status, status.message)
             }
+        }
+    }
+
+    fun onTelegramEnabledChanged(enabled: Boolean) {
+        _uiState.update {
+            it.copy(
+                localRuntime = it.localRuntime.copy(telegramEnabled = enabled),
+            )
+        }
+        viewModelScope.launch {
+            localStateRepository.updateLocalRuntime { current ->
+                current.copy(telegramEnabled = enabled)
+            }
+        }
+    }
+
+    fun onTelegramBotTokenChanged(value: String) {
+        _uiState.update {
+            it.copy(
+                localRuntime = it.localRuntime.copy(telegramBotToken = value),
+            )
+        }
+        viewModelScope.launch {
+            localStateRepository.updateLocalRuntime { current ->
+                current.copy(telegramBotToken = value.trim())
+            }
+        }
+    }
+
+    fun onTelegramAllowedUsersChanged(value: String) {
+        _uiState.update {
+            it.copy(
+                localRuntime = it.localRuntime.copy(telegramAllowedUsers = value),
+            )
+        }
+        viewModelScope.launch {
+            localStateRepository.updateLocalRuntime { current ->
+                current.copy(telegramAllowedUsers = value.trim())
+            }
+        }
+    }
+
+    fun onTelegramMarkdownV2Changed(enabled: Boolean) {
+        _uiState.update {
+            it.copy(
+                localRuntime = it.localRuntime.copy(telegramUseMarkdownV2 = enabled),
+            )
+        }
+        viewModelScope.launch {
+            localStateRepository.updateLocalRuntime { current ->
+                current.copy(telegramUseMarkdownV2 = enabled)
+            }
+        }
+    }
+
+    fun requestNotificationsPermission() {
+        requestNotificationPermission()
+    }
+
+    fun onNotificationPermissionResult(granted: Boolean) {
+        _uiState.update { it.copy(hasNotificationPermission = granted) }
+        if (granted) {
+            if (pendingKeepAliveEnable) {
+                pendingKeepAliveEnable = false
+                onLocalKeepAliveChanged(true)
+                return
+            }
+            val status = _uiState.value.connectionState
+            updateConnectionState(status.status, status.message)
+        } else {
+            pendingKeepAliveEnable = false
+            if (_uiState.value.localRuntime.keepAliveEnabled) {
+                _uiState.update {
+                    it.copy(
+                        localRuntime = it.localRuntime.copy(keepAliveEnabled = false),
+                    )
+                }
+                viewModelScope.launch {
+                    localStateRepository.updateLocalRuntime { current ->
+                        current.copy(keepAliveEnabled = false)
+                    }
+                }
+            }
+            val status = _uiState.value.connectionState
+            updateConnectionState(status.status, status.message)
+            showMessage("Без разрешения на уведомления foreground keep alive не удержит локальный runtime.")
         }
     }
 
@@ -213,7 +316,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             reconnectAttempts = 0
             cancelReconnectLoop()
             closeSocket()
-            runCatching { localRuntimeManager.stopLocalRuntime() }
+            runCatching {
+                localRuntimeManager.stopLocalRuntime(_uiState.value.localRuntime.dataDirectory)
+            }
             cachedHandshake = null
             _uiState.update {
                 it.copy(
@@ -311,9 +416,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun connectLauncher() {
+    fun connectLauncher(forceRestart: Boolean = false) {
         launchConnectionTask {
-            connectLauncherInternal(silent = false, reconnecting = false)
+            connectLauncherInternal(
+                silent = false,
+                reconnecting = false,
+                forceRestart = forceRestart,
+            )
         }
     }
 
@@ -324,7 +433,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             cancelReconnectLoop()
             closeSocket()
             if (stopLocalRuntime) {
-                localRuntimeManager.stopLocalRuntime()
+                localRuntimeManager.stopLocalRuntime(_uiState.value.localRuntime.dataDirectory)
             }
             cachedHandshake = null
             _uiState.update {
@@ -340,13 +449,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshThreads() {
         launchConnectionTask {
             val config = resolvedLauncherConfig() ?: run {
-                showMessage(
-                    if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
-                        "Сначала установи и запусти локальный RuClaw."
-                    } else {
-                        "Сначала укажи launcher URL и access token."
-                    },
-                )
+                showMessage("Сначала установи и запусти локальный RuClaw.")
                 return@launchConnectionTask
             }
 
@@ -359,11 +462,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 localStateRepository.replaceThreads(remoteThreads)
                 applyStoreSnapshot()
             } catch (error: Throwable) {
-                if (error !is CancellationException) {
-                    showMessage(error.message ?: "Не удалось обновить список тредов.")
-                } else {
+                if (error is CancellationException) {
                     throw error
                 }
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось обновить список тредов.",
+                )
             } finally {
                 _uiState.update { it.copy(isRefreshing = false) }
             }
@@ -377,11 +482,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             applyStoreSnapshot(messagesOverride = emptyList())
             val config = resolvedLauncherConfig()
             if (config != null && shouldMaintainConnection) {
-                val handshake = cachedHandshake ?: launcherClient.ensurePico(config.url, config.token).also {
-                    cachedHandshake = it
+                try {
+                    val handshake = cachedHandshake ?: launcherClient.ensurePico(config.url, config.token).also {
+                        cachedHandshake = it
+                    }
+                    openSocket(config.url, config.token, handshake, sessionId)
+                    updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
+                } catch (error: Throwable) {
+                    handleConnectionError(error, silent = false)
                 }
-                openSocket(config.url, config.token, handshake, sessionId)
-                updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
             }
         }
     }
@@ -410,7 +519,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             cachedHandshake = it
                         }
                         openSocket(config.url, config.token, handshake, sessionId)
-                        updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
+                        updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
                     }
                 } else {
                     applyStoreSnapshot(messagesOverride = cached?.messages ?: emptyList())
@@ -454,7 +563,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (socket == null || socketSessionId != sessionId) {
                     openSocket(config.url, config.token, handshake, sessionId)
-                    updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
+                    updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
                 }
 
                 val requestId = "msg-" + System.currentTimeMillis()
@@ -587,9 +696,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
-                if (!silent) {
-                    showMessage(error.message ?: "Не удалось загрузить модели, навыки и инструменты.")
-                }
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось загрузить модели, навыки и инструменты.",
+                    silent = silent,
+                )
             }
         }
     }
@@ -629,7 +740,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error is CancellationException) {
                     throw error
                 }
-                showMessage(error.message ?: "Не удалось переключить модель.")
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось переключить модель.",
+                )
             }
         }
     }
@@ -689,7 +803,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error is CancellationException) {
                     throw error
                 }
-                showMessage(error.message ?: "Не удалось найти навыки.")
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось найти навыки.",
+                )
             }
         }
     }
@@ -744,7 +861,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error is CancellationException) {
                     throw error
                 }
-                showMessage(error.message ?: "Не удалось установить навык.")
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось установить навык.",
+                )
             }
         }
     }
@@ -819,7 +939,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (error is CancellationException) {
                     throw error
                 }
-                showMessage(error.message ?: "Не удалось переключить инструмент.")
+                handleLauncherActionError(
+                    error = error,
+                    fallbackMessage = "Не удалось переключить инструмент.",
+                )
             }
         }
     }
@@ -968,7 +1091,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onAppForegrounded() {
         viewModelScope.launch {
+            val previous = _uiState.value.hasNotificationPermission
+            val current = SessionKeepAliveService.hasNotificationPermission(getApplication())
+            _uiState.update {
+                it.copy(hasNotificationPermission = current)
+            }
             refreshUpdateFromSystem(showFailureMessage = false)
+            if (current && pendingKeepAliveEnable) {
+                onLocalKeepAliveChanged(true)
+            }
+            if (previous != current || _uiState.value.localRuntime.keepAliveEnabled) {
+                val status = _uiState.value.connectionState
+                updateConnectionState(status.status, status.message)
+            }
         }
     }
 
@@ -1014,6 +1149,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(pendingSystemAction = null) }
     }
 
+    private fun requestNotificationPermission() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                getApplication(),
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            _uiState.update {
+                it.copy(
+                    pendingSystemAction = PendingSystemAction(
+                        type = PendingSystemActionType.REQUEST_POST_NOTIFICATIONS,
+                    ),
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    pendingSystemAction = PendingSystemAction(
+                        type = PendingSystemActionType.OPEN_APP_NOTIFICATION_SETTINGS,
+                    ),
+                )
+            }
+        }
+    }
+
     private fun openAllFilesAccessSettings() {
         _uiState.update {
             it.copy(
@@ -1043,11 +1204,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun connectLauncherInternal(
         silent: Boolean,
         reconnecting: Boolean,
+        forceRestart: Boolean = false,
     ) {
         shouldMaintainConnection = true
         cancelReconnectLoop()
 
         try {
+            var localHandshake: PicoHandshake? = null
             if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
                 val localRuntime = _uiState.value.localRuntime
                 if (!localRuntime.isInstalled) {
@@ -1072,16 +1235,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     return
                 }
+                if (localRuntime.keepAliveEnabled && !_uiState.value.hasNotificationPermission) {
+                    requestNotificationPermission()
+                }
                 updateConnectionState(
                     status = if (reconnecting) ConnectionStatus.RECONNECTING else ConnectionStatus.CONNECTING,
                     message = if (reconnecting) "Перезапускаю локальный RuClaw…" else "Поднимаю локальный RuClaw…",
                 )
-                val connection = localRuntimeManager.startLocalRuntime(
-                    LocalRuntimeConfig(
-                        ggufPath = localRuntime.ggufPath,
-                        dataDirectory = localRuntime.dataDirectory,
-                    ),
+                val (connection, handshake) = startLocalRuntimeWithRetries(
+                    localRuntime = localRuntime,
+                    forceRestart = forceRestart,
                 )
+                localHandshake = handshake
                 localStateRepository.updateLocalRuntime { current ->
                     current.copy(
                         isInstalled = true,
@@ -1092,33 +1257,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 applyStoreSnapshot()
-                waitForLocalLauncher(connection.launcherUrl, connection.launcherToken)
+                cachedHandshake = handshake
             }
 
             val config = resolvedLauncherConfig() ?: run {
                 shouldMaintainConnection = false
                 updateConnectionState(ConnectionStatus.DISCONNECTED, null)
                 if (!silent) {
-                    showMessage(
-                        if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
-                            "Подготовь локальный runtime."
-                        } else {
-                            "Укажи launcher URL и access token."
-                        },
-                    )
+                    showMessage("Подготовь локальный runtime.")
                 }
                 return
             }
 
             updateConnectionState(
                 status = if (reconnecting) ConnectionStatus.RECONNECTING else ConnectionStatus.CONNECTING,
-                message = if (reconnecting) "Восстанавливаю подключение…" else "Проверяю launcher…",
+                message = if (reconnecting) "Восстанавливаю подключение…" else "Проверяю локальный RuClaw…",
             )
             AppDiagnostics.log("Connecting to ${config.url}")
-            if (_uiState.value.launcherMode == LauncherMode.REMOTE) {
-                localStateRepository.saveLauncherConfig(config.url, config.token)
-            }
-            val handshake = launcherClient.ensurePico(config.url, config.token)
+            val handshake = localHandshake ?: launcherClient.ensurePico(config.url, config.token)
             cachedHandshake = handshake
 
             val remoteThreads = launcherClient.listSessions(config.url, config.token)
@@ -1140,14 +1296,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             openSocket(config.url, config.token, handshake, sessionId)
             reconnectAttempts = 0
-            updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
+            updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
             refreshLauncherCatalog(force = true, silent = true)
         } catch (error: Throwable) {
-            shouldMaintainConnection = false
+            shouldMaintainConnection = reconnecting && _uiState.value.launcherMode == LauncherMode.LOCAL
             if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
-                runCatching { localRuntimeManager.stopLocalRuntime() }
+                runCatching {
+                    localRuntimeManager.stopLocalRuntime(_uiState.value.localRuntime.dataDirectory)
+                }
             }
-            handleConnectionError(error, silent)
+            handleConnectionError(error, silent, allowLocalRecovery = false)
+            if (reconnecting && _uiState.value.launcherMode == LauncherMode.LOCAL) {
+                shouldMaintainConnection = true
+                throw error
+            }
         }
     }
 
@@ -1241,7 +1403,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 persistSession(expectedSessionId, _uiState.value.messages)
-                showMessage(event.message.ifBlank { "Launcher вернул ошибку." })
+                showMessage(event.message.ifBlank { "Локальный RuClaw вернул ошибку." })
             }
 
             is PicoEvent.SocketClosed -> {
@@ -1277,7 +1439,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sessionId: String,
         reason: String,
     ) {
-        val config = resolvedLauncherConfig() ?: return
         if (!shouldMaintainConnection) {
             return
         }
@@ -1292,12 +1453,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (!shouldMaintainConnection) {
                 return@launch
             }
+            if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
+                runCatching {
+                    connectLauncherInternal(silent = true, reconnecting = true)
+                }.onFailure { error ->
+                    if (error !is CancellationException) {
+                        shouldMaintainConnection = true
+                        AppDiagnostics.log("Local reconnect failed: ${error.message ?: "unknown"}")
+                        updateDiagnostics()
+                        scheduleReconnect(sessionId, "Перезапускаю локальный RuClaw…")
+                    }
+                }
+                return@launch
+            }
+
+            val config = resolvedLauncherConfig() ?: return@launch
             runCatching {
                 val handshake = launcherClient.ensurePico(config.url, config.token)
                 cachedHandshake = handshake
                 openSocket(config.url, config.token, handshake, sessionId)
                 reconnectAttempts = 0
-                updateConnectionState(ConnectionStatus.CONNECTED, "Подключено к launcher")
+                updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
             }.onFailure { error ->
                 if (error !is CancellationException) {
                     AppDiagnostics.log("Reconnect failed: ${error.message ?: "unknown"}")
@@ -1316,6 +1492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun handleConnectionError(
         error: Throwable,
         silent: Boolean,
+        allowLocalRecovery: Boolean = true,
     ) {
         if (error is CancellationException) {
             throw error
@@ -1327,18 +1504,91 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val (status, message) = when (error) {
             is RuClawApiException -> {
                 if (error.statusCode == 401) {
-                    ConnectionStatus.FAILED_AUTH to "Launcher access token не подошёл."
+                    ConnectionStatus.FAILED_AUTH to "Токен локального RuClaw не подошёл."
                 } else {
                     ConnectionStatus.FAILED_NETWORK to describeLauncherFailure(error.statusCode, error.message)
                 }
             }
 
-            else -> ConnectionStatus.FAILED_NETWORK to (error.message ?: "Не удалось подключиться к launcher.")
+            else -> ConnectionStatus.FAILED_NETWORK to (error.message ?: "Не удалось подключиться к локальному RuClaw.")
         }
 
+        val shouldRecover = allowLocalRecovery && shouldRecoverLocalConnection(error)
         updateConnectionState(status, message)
+        if (shouldRecover) {
+            scheduleLocalRecovery("Перезапускаю локальный RuClaw…")
+        }
         if (!silent) {
-            showMessage(message)
+            if (shouldRecover) {
+                showMessage("Локальный RuClaw недоступен, переподнимаю…")
+            } else {
+                showMessage(message)
+            }
+        }
+    }
+
+    private suspend fun handleLauncherActionError(
+        error: Throwable,
+        fallbackMessage: String,
+        silent: Boolean = false,
+    ) {
+        if (error is CancellationException) {
+            throw error
+        }
+        if (shouldRecoverLocalConnection(error)) {
+            handleConnectionError(error, silent = silent)
+            return
+        }
+        if (!silent) {
+            showMessage(error.message ?: fallbackMessage)
+        }
+    }
+
+    private fun shouldRecoverLocalConnection(error: Throwable): Boolean {
+        if (_uiState.value.launcherMode != LauncherMode.LOCAL || !_uiState.value.localRuntime.isInstalled) {
+            return false
+        }
+        return when (error) {
+            is ConnectException,
+            is SocketException,
+            is SocketTimeoutException -> true
+
+            is RuClawApiException -> error.statusCode in 500..599 || error.statusCode in setOf(429, 553)
+
+            is IOException -> {
+                val message = error.message.orEmpty().lowercase()
+                message.contains("127.0.0.1:18800") ||
+                    message.contains("failed to connect") ||
+                    message.contains("connection refused") ||
+                    message.contains("broken pipe") ||
+                    message.contains("unexpected end of stream") ||
+                    message.contains("socket closed") ||
+                    message.contains("timeout")
+            }
+
+            else -> false
+        }
+    }
+
+    private fun scheduleLocalRecovery(reason: String) {
+        if (_uiState.value.launcherMode != LauncherMode.LOCAL || !_uiState.value.localRuntime.isInstalled) {
+            return
+        }
+        if (reconnectJob?.isActive == true) {
+            updateConnectionState(ConnectionStatus.RECONNECTING, reason)
+            return
+        }
+        shouldMaintainConnection = true
+        val existingSessionId = _uiState.value.activeSessionId ?: localStateRepository.snapshot().activeSessionId
+        if (existingSessionId != null) {
+            scheduleReconnect(existingSessionId, reason)
+            return
+        }
+        viewModelScope.launch {
+            val sessionId = _uiState.value.activeSessionId
+                ?: localStateRepository.snapshot().activeSessionId
+                ?: createLocalSession()
+            scheduleReconnect(sessionId, reason)
         }
     }
 
@@ -1472,18 +1722,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             persisted.cachedSessions.firstOrNull { it.sessionId == id }
         }
         val currentLocalRuntime = _uiState.value.localRuntime
+        val hasNotificationPermission = _uiState.value.hasNotificationPermission
         _uiState.update {
             it.copy(
                 isLoaded = true,
-                launcherMode = persisted.launcherMode,
+                launcherMode = LauncherMode.LOCAL,
                 launcherConfig = it.launcherConfig.copy(
-                    url = persisted.launcherUrl.ifBlank { BuildConfig.DEFAULT_LAUNCHER_URL },
+                    url = persisted.launcherUrl.ifBlank { DEFAULT_LOCAL_LAUNCHER_URL },
                     token = persisted.launcherToken,
                 ),
                 localRuntime = persisted.localRuntime.toUiState(currentLocalRuntime),
                 threads = persisted.threads,
                 activeSessionId = persisted.activeSessionId,
                 messages = messagesOverride ?: activeCached?.messages ?: emptyList(),
+                hasNotificationPermission = hasNotificationPermission,
                 updateState = persisted.updateState.toUiState(),
                 diagnostics = AppDiagnostics.snapshot(),
             )
@@ -1513,7 +1765,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             LauncherMode.REMOTE -> {
-                val url = _uiState.value.launcherConfig.url.trim().ifBlank { BuildConfig.DEFAULT_LAUNCHER_URL }
+                val url = _uiState.value.launcherConfig.url.trim().ifBlank { DEFAULT_LOCAL_LAUNCHER_URL }
                 val token = _uiState.value.launcherConfig.token.trim()
                 if (token.isBlank()) {
                     null
@@ -1527,19 +1779,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun waitForLocalLauncher(
         url: String,
         token: String,
-    ) {
+    ): PicoHandshake {
         var lastError: Throwable? = null
         repeat(24) {
             runCatching {
                 launcherClient.ensurePico(url, token)
-            }.onSuccess {
-                return
+            }.onSuccess { handshake ->
+                return handshake
             }.onFailure { error ->
                 lastError = error
                 delay(500)
             }
         }
-        throw IOException(lastError?.message ?: "Локальный launcher не поднялся.")
+        throw IOException(lastError?.message ?: "Локальный RuClaw не поднялся.")
+    }
+
+    private suspend fun startLocalRuntimeWithRetries(
+        localRuntime: LocalRuntimeUiState,
+        forceRestart: Boolean,
+    ): Pair<LocalRuntimeConnection, PicoHandshake> {
+        var lastError: Throwable? = null
+        repeat(3) { attempt ->
+            runCatching {
+                val connection = localRuntimeManager.startLocalRuntime(
+                    LocalRuntimeConfig(
+                        ggufPath = localRuntime.ggufPath,
+                        dataDirectory = localRuntime.dataDirectory,
+                        forceRestart = forceRestart || attempt > 0,
+                        telegram = LocalTelegramConfig(
+                            enabled = localRuntime.telegramEnabled,
+                            botToken = localRuntime.telegramBotToken,
+                            allowedUsers = localRuntime.telegramAllowedUsers,
+                            useMarkdownV2 = localRuntime.telegramUseMarkdownV2,
+                        ),
+                    ),
+                )
+                val handshake = waitForLocalLauncher(connection.launcherUrl, connection.launcherToken)
+                connection to handshake
+            }.onSuccess { ready ->
+                return ready
+            }.onFailure { error ->
+                if (error is CancellationException) {
+                    throw error
+                }
+                lastError = error
+                AppDiagnostics.log("Local runtime start attempt ${attempt + 1} failed: ${error.message ?: "unknown"}")
+                runCatching {
+                    localRuntimeManager.stopLocalRuntime(localRuntime.dataDirectory)
+                }
+                if (attempt < 2) {
+                    delay((attempt + 1) * 800L)
+                }
+            }
+        }
+        throw IOException(lastError?.message ?: "Локальный RuClaw не поднялся.")
     }
 
     private fun emptyCachedSession(sessionId: String): CachedSession {
@@ -1569,7 +1862,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             message = when {
                 _uiState.value.launcherMode == LauncherMode.LOCAL ->
                     message ?: "Локальный RuClaw работает в фоне"
-                else -> message ?: "Launcher подключён"
+                else -> message ?: "Локальный RuClaw активен"
             },
         )
     }
@@ -1584,7 +1877,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return false
         }
         return if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
-            _uiState.value.localRuntime.keepAliveEnabled
+            _uiState.value.localRuntime.keepAliveEnabled && _uiState.value.hasNotificationPermission
         } else {
             true
         }
@@ -1594,7 +1887,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return if (_uiState.value.launcherMode == LauncherMode.LOCAL) {
             "Сначала установи и запусти локальный RuClaw."
         } else {
-            "Сначала подключи launcher."
+            "Сначала подними локальный RuClaw."
         }
     }
 
@@ -1676,6 +1969,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             dataDirectory = dataDirectory,
             ggufPath = ggufPath,
             keepAliveEnabled = keepAliveEnabled,
+            telegramEnabled = telegramEnabled,
+            telegramBotToken = telegramBotToken,
+            telegramAllowedUsers = telegramAllowedUsers,
+            telegramUseMarkdownV2 = telegramUseMarkdownV2,
             installState = current?.installState ?: LocalRuntimeInstallState.IDLE,
             installLogs = current?.installLogs ?: emptyList(),
         )
@@ -1709,15 +2006,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun describeLauncherFailure(statusCode: Int?, fallback: String): String {
         return when (statusCode) {
-            401 -> "Launcher access token не подошёл."
-            403 -> "Launcher отклонил подключение к чату. Проверь сеть и доступ с телефона."
-            429 -> "Launcher упёрся в лимит запросов. Подожди немного и отправь ещё раз."
-            502 -> "Launcher не достучался до gateway. Подожди пару секунд и попробуй снова."
-            503 -> "Launcher chat временно недоступен. Gateway ещё поднимается или занят."
-            504 -> "Launcher не дождался ответа от gateway. Повтори запрос чуть позже."
-            553 -> "Launcher вернул нестандартную сетевую ошибку по чату. Обычно это временный сбой шлюза."
-            in 500..599 -> "Launcher временно не отвечает по чату. Повтори запрос чуть позже."
-            else -> fallback.ifBlank { "Не удалось подключиться к launcher." }
+            401 -> "Токен локального RuClaw не подошёл."
+            403 -> "Локальный RuClaw отклонил подключение к чату. Проверь токен и права доступа."
+            429 -> "Локальный RuClaw упёрся в лимит запросов. Подожди немного и отправь ещё раз."
+            502 -> "Локальный RuClaw не достучался до шлюза. Подожди пару секунд и попробуй снова."
+            503 -> "Локальный RuClaw временно недоступен. Рантайм ещё поднимается или занят."
+            504 -> "Локальный RuClaw не дождался ответа от шлюза. Повтори запрос чуть позже."
+            553 -> "Локальный RuClaw вернул нестандартную сетевую ошибку по чату. Обычно это временный сбой шлюза."
+            in 500..599 -> "Локальный RuClaw временно не отвечает по чату. Повтори запрос чуть позже."
+            else -> fallback.ifBlank { "Не удалось подключиться к локальному RuClaw." }
         }
     }
 
@@ -1758,14 +2055,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        val preserveLocalRuntime = _uiState.value.launcherMode == LauncherMode.LOCAL &&
+            _uiState.value.localRuntime.keepAliveEnabled &&
+            _uiState.value.hasNotificationPermission &&
+            _uiState.value.connectionState.status in setOf(
+                ConnectionStatus.CONNECTING,
+                ConnectionStatus.CONNECTED,
+                ConnectionStatus.RECONNECTING,
+            )
+
         shouldMaintainConnection = false
         cancelReconnectLoop()
         updateJob?.cancel()
         runBlocking {
             closeSocket()
-            localRuntimeManager.stopLocalRuntime()
+            if (!preserveLocalRuntime) {
+                localRuntimeManager.stopLocalRuntime(_uiState.value.localRuntime.dataDirectory)
+            }
         }
-        SessionKeepAliveService.sync(getApplication(), false, "RuClaw Android", "")
+        if (!preserveLocalRuntime) {
+            SessionKeepAliveService.sync(getApplication(), false, "RuClaw Android", "")
+        }
         super.onCleared()
     }
 }

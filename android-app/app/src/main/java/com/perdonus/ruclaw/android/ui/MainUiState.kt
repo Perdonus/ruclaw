@@ -14,7 +14,7 @@ import com.perdonus.ruclaw.android.core.model.LauncherToolItem
 
 data class MainUiState(
     val isLoaded: Boolean = false,
-    val launcherMode: LauncherMode = LauncherMode.REMOTE,
+    val launcherMode: LauncherMode = LauncherMode.LOCAL,
     val launcherConfig: LauncherConfigDraft = LauncherConfigDraft(),
     val localRuntime: LocalRuntimeUiState = LocalRuntimeUiState(),
     val connectionState: ConnectionState = ConnectionState(),
@@ -31,6 +31,7 @@ data class MainUiState(
     val bannerMessage: String? = null,
     val pendingExternalUrl: String? = null,
     val pendingSystemAction: PendingSystemAction? = null,
+    val hasNotificationPermission: Boolean = true,
     val updateState: UpdateUiState = UpdateUiState(),
     val diagnostics: List<String> = emptyList(),
 )
@@ -44,6 +45,10 @@ data class LocalRuntimeUiState(
     val dataDirectory: String = "",
     val ggufPath: String = "",
     val keepAliveEnabled: Boolean = true,
+    val telegramEnabled: Boolean = false,
+    val telegramBotToken: String = "",
+    val telegramAllowedUsers: String = "",
+    val telegramUseMarkdownV2: Boolean = false,
     val installState: LocalRuntimeInstallState = LocalRuntimeInstallState.IDLE,
     val installLogs: List<String> = emptyList(),
 )
@@ -102,6 +107,8 @@ data class PendingSystemAction(
 enum class PendingSystemActionType {
     OPEN_UNKNOWN_SOURCES_SETTINGS,
     OPEN_ALL_FILES_ACCESS_SETTINGS,
+    OPEN_APP_NOTIFICATION_SETTINGS,
+    REQUEST_POST_NOTIFICATIONS,
     INSTALL_APK,
 }
 
@@ -109,10 +116,7 @@ val MainUiState.activeThread: ChatThreadSummary?
     get() = threads.firstOrNull { it.sessionId == activeSessionId }
 
 val MainUiState.hasConfiguredLauncher: Boolean
-    get() = when (launcherMode) {
-        LauncherMode.LOCAL -> connectionState.status == ConnectionStatus.CONNECTED
-        LauncherMode.REMOTE -> launcherConfig.url.trim().isNotBlank() && launcherConfig.token.trim().isNotBlank()
-    }
+    get() = connectionState.status == ConnectionStatus.CONNECTED
 
 const val DEFAULT_LOCAL_LAUNCHER_URL = "http://127.0.0.1:18800"
 const val DEFAULT_LOCAL_LAUNCHER_TOKEN = "ruclaw-local"

@@ -1,9 +1,6 @@
 name: Android APK Release
 
 on:
-  release:
-    types:
-      - published
   push:
     tags:
       - "v*"
@@ -22,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      RELEASE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
     defaults:
       run:
         working-directory: android-app
@@ -71,7 +68,7 @@ jobs:
             exit 1
           fi
           version_name="${release_tag#v}"
-          version_code="$(git rev-list --count "${release_tag}")"
+          version_code="$(date -u +%s)"
 
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "version_name=${version_name}" >> "${GITHUB_OUTPUT}"

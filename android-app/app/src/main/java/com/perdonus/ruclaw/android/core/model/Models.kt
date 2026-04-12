@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 data class PersistedAppState(
     val launcherUrl: String = "",
     val launcherToken: String = "",
-    val launcherMode: LauncherMode = LauncherMode.REMOTE,
+    val launcherMode: LauncherMode = LauncherMode.LOCAL,
     val localRuntime: PersistedLocalRuntimeState = PersistedLocalRuntimeState(),
     val activeSessionId: String? = null,
     val threads: List<ChatThreadSummary> = emptyList(),
@@ -79,6 +79,10 @@ data class PersistedLocalRuntimeState(
     val dataDirectory: String = "",
     val ggufPath: String = "",
     val keepAliveEnabled: Boolean = true,
+    val telegramEnabled: Boolean = false,
+    val telegramBotToken: String = "",
+    val telegramAllowedUsers: String = "",
+    val telegramUseMarkdownV2: Boolean = false,
 )
 
 data class ComposerState(

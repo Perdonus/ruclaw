@@ -4,6 +4,7 @@
 
 package com.perdonus.ruclaw.android.ui
 
+import android.Manifest
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -68,6 +69,7 @@ import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -122,7 +124,6 @@ import com.perdonus.ruclaw.android.core.model.ChatRole
 import com.perdonus.ruclaw.android.core.model.ChatThreadSummary
 import com.perdonus.ruclaw.android.core.model.ComposerAttachment
 import com.perdonus.ruclaw.android.core.model.ConnectionStatus
-import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.ui.components.MarkdownMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -136,6 +137,11 @@ fun MainScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
     val feedbackScope = rememberCoroutineScope()
+    val notificationsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.onNotificationPermissionResult(granted)
+    }
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -220,14 +226,33 @@ fun MainScreen(viewModel: MainViewModel) {
                 }
             }
 
-            PendingSystemActionType.INSTALL_APK -> {
-                val targetUri = action.uri?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.parse(targetUri), "application/vnd.android.package-archive")
+            PendingSystemActionType.OPEN_APP_NOTIFICATION_SETTINGS -> {
+                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    putExtra("app_package", context.packageName)
+                    putExtra("app_uid", context.applicationInfo.uid)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 runCatching { context.startActivity(intent) }
+            }
+
+            PendingSystemActionType.REQUEST_POST_NOTIFICATIONS -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notificationsPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    viewModel.onNotificationPermissionResult(true)
+                }
+            }
+
+            PendingSystemActionType.INSTALL_APK -> {
+                action.uri?.takeIf { it.isNotBlank() }?.let { targetUri ->
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(Uri.parse(targetUri), "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    runCatching { context.startActivity(intent) }
+                }
             }
         }
         viewModel.consumePendingSystemAction()
@@ -500,7 +525,7 @@ private fun SidebarPanel(
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "Нажми + в шапке или подключись к launcher, чтобы подтянуть историю.",
+                            text = "Нажми + в шапке, чтобы начать новый локальный диалог.",
                             color = Color(0xFFB8C4D2),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -618,6 +643,14 @@ private fun ChatStage(
                     }
                 }
             }
+        } else {
+            EmptyStage(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = topPadding, bottom = bottomPadding),
+            )
         }
 
         AnimatedVisibility(
@@ -1092,7 +1125,7 @@ private fun EmptyStage(
     modifier: Modifier = Modifier,
 ) {
     val prompts = listOf(
-        "Сделай Android-интерфейс под launcher",
+        "Сделай Android-интерфейс под локальный RuClaw",
         "Покажи где ломается API и как исправить",
         "Подготовь новый релиз APK",
     )
@@ -1109,24 +1142,25 @@ private fun EmptyStage(
             color = Color.White,
             textAlign = TextAlign.Center,
         )
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = when {
-                state.launcherMode == LauncherMode.LOCAL &&
-                    state.connectionState.status == ConnectionStatus.CONNECTED ->
-                    "Локальный RuClaw готов. Выбери тред слева или начни новый диалог."
-                state.launcherMode == LauncherMode.LOCAL && state.localRuntime.isInstalled ->
-                    "Локальный runtime установлен. Открой настройки и нажми «Запустить локально». GGUF модель можно добавить потом."
-                state.launcherMode == LauncherMode.LOCAL ->
-                    "Открой настройки и нажми «Установить». GGUF модель можно добавить потом, это опционально."
-                state.hasConfiguredLauncher ->
-                    "Выбери тред слева или начни новый диалог."
-                else ->
-                    "Открой настройки, укажи launcher URL и access token, потом можно писать прямо сюда."
+        Spacer(modifier = Modifier.height(16.dp))
+        AssistChip(
+            onClick = { viewModel.toggleSettings(true) },
+            label = {
+                Text(
+                    text = when {
+                        state.connectionState.status == ConnectionStatus.CONNECTED -> "Локальный RuClaw активен"
+                        state.localRuntime.isInstalled -> "Локальный runtime установлен"
+                        else -> "Нажми на настройки и установи local runtime"
+                    },
+                )
             },
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color(0xFFB8C4D2),
-            textAlign = TextAlign.Center,
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.Link,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
         )
         Spacer(modifier = Modifier.height(22.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1174,61 +1208,29 @@ private fun SettingsSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Настройки подключения",
+                text = "Локальный RuClaw",
                 style = MaterialTheme.typography.titleLarge,
                 color = Color.White,
             )
 
-            ConnectionModeCard(
-                launcherMode = state.launcherMode,
-                onModeChanged = viewModel::onLauncherModeChanged,
+            LocalRuntimeSection(
+                localRuntime = state.localRuntime,
+                connectionStatus = state.connectionState.status,
+                hasNotificationPermission = state.hasNotificationPermission,
+                onInstall = viewModel::installLocalRuntime,
+                onDataDirectoryChanged = viewModel::onLocalDataDirectoryChanged,
+                onPickDataDirectory = onPickDataDirectory,
+                onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
+                onRequestNotificationPermission = viewModel::requestNotificationsPermission,
+                onTelegramEnabledChanged = viewModel::onTelegramEnabledChanged,
+                onTelegramBotTokenChanged = viewModel::onTelegramBotTokenChanged,
+                onTelegramAllowedUsersChanged = viewModel::onTelegramAllowedUsersChanged,
+                onTelegramMarkdownV2Changed = viewModel::onTelegramMarkdownV2Changed,
+                onLaunch = {
+                    viewModel.toggleSettings(false)
+                    viewModel.connectLauncher(forceRestart = true)
+                },
             )
-
-            if (state.launcherMode == LauncherMode.REMOTE) {
-                OutlinedTextField(
-                    value = state.launcherConfig.url,
-                    onValueChange = viewModel::onLauncherUrlChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Launcher URL") },
-                    placeholder = { Text("http://192.168.1.109:18800") },
-                    singleLine = true,
-                    colors = sheetFieldColors(),
-                )
-
-                OutlinedTextField(
-                    value = state.launcherConfig.token,
-                    onValueChange = viewModel::onLauncherTokenChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Launcher access token") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true,
-                    colors = sheetFieldColors(),
-                )
-
-                FilledTonalButton(
-                    onClick = {
-                        viewModel.toggleSettings(false)
-                        viewModel.connectLauncher()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    Text("Подключить")
-                }
-            } else {
-                LocalRuntimeSection(
-                    localRuntime = state.localRuntime,
-                    connectionStatus = state.connectionState.status,
-                    onInstall = viewModel::installLocalRuntime,
-                    onDataDirectoryChanged = viewModel::onLocalDataDirectoryChanged,
-                    onPickDataDirectory = onPickDataDirectory,
-                    onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
-                    onLaunch = {
-                        viewModel.toggleSettings(false)
-                        viewModel.connectLauncher()
-                    },
-                )
-            }
 
             HorizontalDivider(color = Color(0x1FFFFFFF))
 
@@ -1250,63 +1252,200 @@ private fun SettingsSheet(
 }
 
 @Composable
-private fun ConnectionModeCard(
-    launcherMode: LauncherMode,
-    onModeChanged: (LauncherMode) -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = Color(0xCC182231),
-        border = BorderStroke(1.dp, Color(0x18FFFFFF)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "Локальный RuClaw",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
-                Text(
-                    text = if (launcherMode == LauncherMode.LOCAL) {
-                        "Включён локальный запуск: приложение само поднимет runtime и launcher."
-                    } else {
-                        "Выключен: использую обычное подключение к внешнему launcher по URL и токену."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFB8C4D2),
-                )
-            }
-            Switch(
-                checked = launcherMode == LauncherMode.LOCAL,
-                onCheckedChange = { enabled ->
-                    onModeChanged(if (enabled) LauncherMode.LOCAL else LauncherMode.REMOTE)
-                },
-            )
-        }
-    }
-}
-
-@Composable
 private fun LocalRuntimeSection(
     localRuntime: LocalRuntimeUiState,
     connectionStatus: ConnectionStatus,
+    hasNotificationPermission: Boolean,
     onInstall: () -> Unit,
     onDataDirectoryChanged: (String) -> Unit,
     onPickDataDirectory: () -> Unit,
     onKeepAliveChanged: (Boolean) -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onTelegramEnabledChanged: (Boolean) -> Unit,
+    onTelegramBotTokenChanged: (String) -> Unit,
+    onTelegramAllowedUsersChanged: (String) -> Unit,
+    onTelegramMarkdownV2Changed: (Boolean) -> Unit,
     onLaunch: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val installBusy = localRuntime.installState == LocalRuntimeInstallState.INSTALLING
+    val launcherBusy = connectionStatus in setOf(
+        ConnectionStatus.CONNECTING,
+        ConnectionStatus.CONNECTED,
+        ConnectionStatus.RECONNECTING,
+    )
+    val launcherConnecting = connectionStatus in setOf(
+        ConnectionStatus.CONNECTING,
+        ConnectionStatus.RECONNECTING,
+    )
+    val launcherLive = connectionStatus == ConnectionStatus.CONNECTED
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = Color.Transparent,
+            border = BorderStroke(1.dp, Color(0x1FFFFFFF)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF192535), Color(0xFF0E141D)),
+                            start = Offset.Zero,
+                            end = Offset(920f, 1320f),
+                        ),
+                    )
+                    .padding(18.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Установка и запуск",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color.White,
+                        )
+                        AssistChip(
+                            onClick = {},
+                            label = {
+                                Text(
+                                    when (connectionStatus) {
+                                        ConnectionStatus.CONNECTED -> "Онлайн"
+                                        ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "Подъём"
+                                        else -> if (localRuntime.isInstalled) "Оффлайн" else "Не установлен"
+                                    },
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Link,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(if (localRuntime.isInstalled) "Установлено" else "Не установлено") },
+                        )
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(if (localRuntime.keepAliveEnabled) "Фон: вкл" else "Фон: выкл") },
+                        )
+                        if (localRuntime.telegramEnabled) {
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("Телеграм: вкл") },
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        FilledTonalButton(
+                            onClick = onInstall,
+                            enabled = !installBusy && !launcherBusy,
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (installBusy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Установка…")
+                            } else {
+                                Text(if (localRuntime.isInstalled) "Переустановить runtime" else "Установить runtime")
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = onLaunch,
+                            enabled = !installBusy && localRuntime.isInstalled && !launcherConnecting,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Color(0xFF72D8C4),
+                                contentColor = Color(0xFF081017),
+                                disabledContainerColor = Color(0x553B4C5F),
+                                disabledContentColor = Color(0x99C9D0D7),
+                            ),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Send,
+                                contentDescription = "Запустить локально",
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (launcherLive) "Перезапустить" else "Запустить")
+                        }
+                    }
+
+                    if (localRuntime.runtimeVersion.isNotBlank()) {
+                        Text(
+                            text = "Версия " + localRuntime.runtimeVersion,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color(0xFFB8C4D2),
+                        )
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = installBusy ||
+                localRuntime.installState == LocalRuntimeInstallState.FAILED ||
+                localRuntime.installLogs.isNotEmpty(),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF0C1118),
+                border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (installBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFF72D8C4),
+                            )
+                        }
+                        Text(
+                            text = if (localRuntime.installState == LocalRuntimeInstallState.FAILED) {
+                                "Ошибка установки"
+                            } else {
+                                "Логи установки"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                        )
+                    }
+                    localRuntime.installLogs.takeLast(8).forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFD3DAE3),
+                        )
+                    }
+                }
+            }
+        }
+
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = Color(0xCC182231),
@@ -1315,198 +1454,125 @@ private fun LocalRuntimeSection(
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = if (localRuntime.isInstalled) {
-                                "Локальный runtime установлен"
-                            } else {
-                                "Сначала установи локальный runtime"
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White,
-                        )
-                        Text(
-                            text = if (connectionStatus == ConnectionStatus.CONNECTED) {
-                                "Локальный launcher уже запущен на устройстве."
-                            } else if (localRuntime.runtimeVersion.isNotBlank()) {
-                                "Runtime установлен. Теперь можно запустить локальный launcher."
-                            } else {
-                                "Это полноценный локальный RuClaw на устройстве. GGUF модель можно добавить отдельно."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFB8C4D2),
-                        )
-                        if (localRuntime.runtimeVersion.isNotBlank()) {
-                            Text(
-                                text = "Версия runtime: " + localRuntime.runtimeVersion,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF8FA1B5),
-                            )
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = onInstall,
-                        enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING &&
-                            connectionStatus !in setOf(
-                                ConnectionStatus.CONNECTING,
-                                ConnectionStatus.CONNECTED,
-                                ConnectionStatus.RECONNECTING,
-                            ),
-                        shape = RoundedCornerShape(18.dp),
-                    ) {
-                        if (localRuntime.installState == LocalRuntimeInstallState.INSTALLING) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Установка…")
-                        } else {
-                            Text(if (localRuntime.isInstalled) "Переустановить" else "Установить")
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = localRuntime.installState == LocalRuntimeInstallState.INSTALLING ||
-                        localRuntime.installState == LocalRuntimeInstallState.FAILED ||
-                        localRuntime.installLogs.isNotEmpty(),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = Color(0xFF0E141D),
-                        border = BorderStroke(1.dp, Color(0x12FFFFFF)),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (localRuntime.installState == LocalRuntimeInstallState.INSTALLING) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(14.dp),
-                                        strokeWidth = 2.dp,
-                                        color = Color(0xFF72D8C4),
-                                    )
-                                }
-                                Text(
-                                    text = if (localRuntime.installState == LocalRuntimeInstallState.FAILED) {
-                                        "Установка сорвалась"
-                                    } else {
-                                        "Логи установки"
-                                    },
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = Color.White,
-                                )
-                            }
-                            localRuntime.installLogs.takeLast(8).forEach { line ->
-                                Text(
-                                    text = line,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFFD3DAE3),
-                                )
-                            }
-                        }
-                    }
-                }
-
+                Text(
+                    text = "Папка данных",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                )
                 OutlinedTextField(
                     value = localRuntime.dataDirectory,
                     onValueChange = onDataDirectoryChanged,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Папка данных runtime") },
+                    label = { Text("Путь") },
                     placeholder = { Text("Пусто = встроенная папка приложения") },
                     singleLine = true,
                     colors = sheetFieldColors(),
                 )
-
                 TextButton(
                     onClick = onPickDataDirectory,
                     modifier = Modifier.align(Alignment.End),
                 ) {
                     Text("Выбрать папку")
                 }
+            }
+        }
 
-                Text(
-                    text = if (localRuntime.dataDirectory.isBlank()) {
-                        "Если оставить пусто, локальный RuClaw использует встроенную папку приложения для данных, кэша, логов и локальных моделей."
-                    } else {
-                        "Выбранная папка пойдёт под runtime-данные, кэш, логи и локальные модели. Для Download, Documents и других общих папок Android сначала попросит доступ «Все файлы», потом просто повтори установку."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB8C4D2),
-                )
-
-                Text(
-                    text = "Сами исполняемые бинарники всё равно запускаются из встроенного Android native runtime, иначе система выдаёт Permission denied.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8FA1B5),
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0x66111823),
-                    border = BorderStroke(1.dp, Color(0x12FFFFFF)),
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xCC182231),
+            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = "Keep alive уведомление",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = Color.White,
-                            )
-                            Text(
-                                text = "Держит локальный RuClaw живым в фоне через foreground notification. Можно выключить.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFB8C4D2),
-                            )
-                        }
-                        Switch(
-                            checked = localRuntime.keepAliveEnabled,
-                            onCheckedChange = onKeepAliveChanged,
-                        )
-                    }
-                }
-
-                FilledTonalButton(
-                    onClick = onLaunch,
-                    enabled = localRuntime.installState != LocalRuntimeInstallState.INSTALLING &&
-                        localRuntime.isInstalled,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        when (connectionStatus) {
-                            ConnectionStatus.CONNECTING,
-                            ConnectionStatus.RECONNECTING -> "Поднимаю локальный RuClaw…"
-                            ConnectionStatus.CONNECTED -> "Перезапустить локально"
-                            else -> "Запустить локально"
-                        },
+                        text = "Фоновое удержание",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
                     )
+                    Switch(
+                        checked = localRuntime.keepAliveEnabled,
+                        onCheckedChange = onKeepAliveChanged,
+                    )
+                }
+                if (!hasNotificationPermission) {
+                    FilledTonalButton(
+                        onClick = onRequestNotificationPermission,
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        Text("Разрешить уведомления")
+                    }
+                }
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xCC182231),
+            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Telegram бот",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                    )
+                    Switch(
+                        checked = localRuntime.telegramEnabled,
+                        onCheckedChange = onTelegramEnabledChanged,
+                    )
+                }
+                if (localRuntime.telegramEnabled) {
+                    OutlinedTextField(
+                        value = localRuntime.telegramBotToken,
+                        onValueChange = onTelegramBotTokenChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Токен бота") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        colors = sheetFieldColors(),
+                    )
+                    OutlinedTextField(
+                        value = localRuntime.telegramAllowedUsers,
+                        onValueChange = onTelegramAllowedUsersChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Кому можно") },
+                        placeholder = { Text("12345, 67890 или *") },
+                        colors = sheetFieldColors(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "MarkdownV2",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White,
+                        )
+                        Switch(
+                            checked = localRuntime.telegramUseMarkdownV2,
+                            onCheckedChange = onTelegramMarkdownV2Changed,
+                        )
+                    }
                 }
             }
         }
@@ -1545,12 +1611,12 @@ private fun UpdateSection(
                 Text(
                     text = if (updateState.latestVersionName.isBlank()) {
                         if (updateState.lastCheckedAtEpochMillis > 0L) {
-                            "Latest release пока не опубликован"
+                            "Релиз GitHub пока не опубликован"
                         } else {
-                            "Latest release ещё не запрашивался"
+                            "Релиз GitHub ещё не запрашивался"
                         }
                     } else {
-                        "Latest release: " + updateState.latestVersionName
+                        "Релиз GitHub: " + updateState.latestVersionName
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFFB8C4D2),
@@ -1599,7 +1665,7 @@ private fun UpdateSection(
 
 private fun updateStatusText(updateState: UpdateUiState): String {
     return when {
-        updateState.isChecking -> "Смотрю latest release на GitHub…"
+        updateState.isChecking -> "Смотрю релиз GitHub…"
         updateState.downloadState == UpdateDownloadState.DOWNLOADING && updateState.downloadProgressPercent != null ->
             "APK качается: " + updateState.downloadProgressPercent + "%"
         updateState.downloadState == UpdateDownloadState.DOWNLOADING ->
@@ -1618,122 +1684,6 @@ private fun updateStatusText(updateState: UpdateUiState): String {
             "Публичный релиз на GitHub пока не опубликован."
         else -> "Пока не проверял релизный канал."
     }
-}
-
-@Composable
-private fun ConnectionChip(status: ConnectionStatus) {
-    val (bg, fg) = when (status) {
-        ConnectionStatus.CONNECTED -> Color(0xFF15392F) to Color(0xFF78E0C8)
-        ConnectionStatus.CONNECTING,
-        ConnectionStatus.RECONNECTING -> Color(0xFF3A2B16) to Color(0xFFFFC36A)
-        ConnectionStatus.FAILED_AUTH,
-        ConnectionStatus.FAILED_NETWORK -> Color(0xFF431E22) to Color(0xFFFF9AA5)
-        ConnectionStatus.DISCONNECTED -> Color(0xFF2A2F39) to Color(0xFFC8D0DA)
-    }
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = bg,
-    ) {
-        Text(
-            text = statusText(status),
-            color = fg,
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-        )
-    }
-}
-
-private fun statusText(status: ConnectionStatus): String {
-    return when (status) {
-        ConnectionStatus.CONNECTED -> "онлайн"
-        ConnectionStatus.CONNECTING -> "подключение"
-        ConnectionStatus.RECONNECTING -> "переподключение"
-        ConnectionStatus.FAILED_AUTH -> "ошибка токена"
-        ConnectionStatus.FAILED_NETWORK -> "ошибка сети"
-        ConnectionStatus.DISCONNECTED -> "оффлайн"
-    }
-}
-
-@Composable
-private fun AnimatedBackdrop(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "backdrop")
-    val orbA by transition.animateFloat(
-        initialValue = -0.1f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(12000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "orbA",
-    )
-    val orbB by transition.animateFloat(
-        initialValue = 1.1f,
-        targetValue = -0.1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(15000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "orbB",
-    )
-    val orbC by transition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 0.9f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "orbC",
-    )
-
-    Canvas(modifier = modifier) {
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF05080D),
-                    Color(0xFF09111A),
-                    Color(0xFF0F1824),
-                ),
-            ),
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0x446DD3BF), Color.Transparent),
-            ),
-            radius = size.minDimension * 0.36f,
-            center = Offset(size.width * orbA, size.height * 0.18f),
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0x35FF9C63), Color.Transparent),
-            ),
-            radius = size.minDimension * 0.44f,
-            center = Offset(size.width * orbB, size.height * 0.74f),
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0x1EF7EAD5), Color.Transparent),
-            ),
-            radius = size.minDimension * 0.25f,
-            center = Offset(size.width * 0.5f, size.height * orbC),
-        )
-    }
-}
-
-@Composable
-private fun StageScrims() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0x10000000),
-                        Color.Transparent,
-                        Color(0x12000000),
-                    ),
-                ),
-            ),
-    )
 }
 
 @Composable

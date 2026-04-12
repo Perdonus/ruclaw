@@ -43,7 +43,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.perdonus.ruclaw.android.core.model.LauncherMode
 import com.perdonus.ruclaw.android.core.model.LauncherModelItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillItem
 import com.perdonus.ruclaw.android.core.model.LauncherSkillSearchItem
@@ -58,7 +57,7 @@ fun AgentSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val catalog = state.launcherCatalog
-    val canConfigureLocalModels = state.launcherMode == LauncherMode.LOCAL && state.localRuntime.isInstalled
+    val canConfigureLocalModels = state.localRuntime.isInstalled
 
     ModalBottomSheet(
         onDismissRequest = { viewModel.toggleAgentSheet(false) },
@@ -89,11 +88,7 @@ fun AgentSheet(
             if (!state.hasConfiguredLauncher && !canConfigureLocalModels) {
                 SectionCard {
                     Text(
-                        text = if (state.launcherMode == LauncherMode.LOCAL) {
-                            "Сначала установи и запусти локальный RuClaw в настройках."
-                        } else {
-                            "Сначала укажи launcher URL и access token в настройках."
-                        },
+                        text = "Сначала установи и запусти локальный RuClaw в настройках.",
                         color = Color.White,
                         style = MaterialTheme.typography.bodyLarge,
                     )
@@ -101,7 +96,6 @@ fun AgentSheet(
             } else {
                 ModelsSection(
                     catalog = catalog,
-                    launcherMode = state.launcherMode,
                     localRuntime = state.localRuntime,
                     launcherReady = state.hasConfiguredLauncher,
                     onSelectModel = viewModel::setDefaultLauncherModel,
@@ -123,7 +117,7 @@ fun AgentSheet(
                 } else if (canConfigureLocalModels) {
                     SectionCard {
                         Text(
-                            text = "Локальный launcher ещё не поднят. GGUF можно выбрать уже сейчас, а сетевые модели, навыки и тулы подтянутся после запуска.",
+                            text = "Локальный RuClaw ещё не поднят. GGUF можно выбрать уже сейчас, а сетевые модели, навыки и тулы подтянутся после запуска.",
                             color = Color(0xFFB8C4D2),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -139,7 +133,6 @@ fun AgentSheet(
 @Composable
 private fun ModelsSection(
     catalog: LauncherCatalogState,
-    launcherMode: LauncherMode,
     localRuntime: LocalRuntimeUiState,
     launcherReady: Boolean,
     onSelectModel: (String) -> Unit,
@@ -154,11 +147,6 @@ private fun ModelsSection(
 
     SectionHeader(
         title = "Модели",
-        subtitle = if (launcherMode == LauncherMode.LOCAL) {
-            "Сетевые модели launcher и опциональная локальная GGUF внизу списка."
-        } else {
-            "Глобальный выбор модели по умолчанию для launcher."
-        },
     )
     SectionCard {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -171,8 +159,8 @@ private fun ModelsSection(
                     EmptySectionText("Модели пока не подтянулись.")
                 }
 
-                launcherMode == LauncherMode.LOCAL && !launcherReady -> {
-                    EmptySectionText("Локальный launcher ещё не поднят. GGUF можно выбрать уже сейчас.")
+                !launcherReady -> {
+                    EmptySectionText("Локальный RuClaw ещё не поднят. GGUF можно выбрать уже сейчас.")
                 }
 
                 else -> {
@@ -186,16 +174,14 @@ private fun ModelsSection(
                 }
             }
 
-            if (launcherMode == LauncherMode.LOCAL) {
-                if (models.isNotEmpty() || launcherReady) {
-                    HorizontalDivider(color = Color(0x14FFFFFF))
-                }
-                LocalGgufModelCard(
-                    ggufPath = localRuntime.ggufPath,
-                    onGgufPathChanged = onLocalModelPathChanged,
-                    onPickGguf = onPickGguf,
-                )
+            if (models.isNotEmpty() || launcherReady) {
+                HorizontalDivider(color = Color(0x14FFFFFF))
             }
+            LocalGgufModelCard(
+                ggufPath = localRuntime.ggufPath,
+                onGgufPathChanged = onLocalModelPathChanged,
+                onPickGguf = onPickGguf,
+            )
         }
     }
 }
@@ -220,11 +206,6 @@ private fun LocalGgufModelCard(
                 text = "Локальная GGUF модель",
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "Опционально. Файл можно выбрать заранее, а приложение само поднимет локальный model server.",
-                color = Color(0xFFB8C4D2),
-                style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedTextField(
                 value = ggufPath,
@@ -331,7 +312,6 @@ private fun SkillsSection(
 
     SectionHeader(
         title = "Навыки",
-        subtitle = "Установленные навыки можно сразу подставить в запрос через /use.",
     )
     SectionCard {
         when {
@@ -562,7 +542,6 @@ private fun ToolsSection(
 
     SectionHeader(
         title = "Тулы",
-        subtitle = "Эти переключатели меняют глобальную конфигурацию launcher.",
     )
     SectionCard {
         when {
@@ -670,20 +649,12 @@ private fun ToolRow(
 @Composable
 private fun SectionHeader(
     title: String,
-    subtitle: String,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            color = Color.White,
-            style = MaterialTheme.typography.titleLarge,
-        )
-        Text(
-            text = subtitle,
-            color = Color(0xFFB8C4D2),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
+    Text(
+        text = title,
+        color = Color.White,
+        style = MaterialTheme.typography.titleLarge,
+    )
 }
 
 @Composable

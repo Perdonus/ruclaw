@@ -36,7 +36,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
 
-        buildConfigField("String", "DEFAULT_LAUNCHER_URL", "\"http://192.168.1.109:18800\"")
+        buildConfigField("String", "DEFAULT_LAUNCHER_URL", "\"http://127.0.0.1:18800\"")
         buildConfigField("String", "UPDATE_REPO_OWNER", "\"$updateRepoOwner\"")
         buildConfigField("String", "UPDATE_REPO_NAME", "\"$updateRepoName\"")
         buildConfigField("String", "UPDATE_APK_ASSET_NAME", "\"$updateApkAssetName\"")
@@ -69,6 +69,11 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+
         getByName("release") {
             isMinifyEnabled = false
             isShrinkResources = false

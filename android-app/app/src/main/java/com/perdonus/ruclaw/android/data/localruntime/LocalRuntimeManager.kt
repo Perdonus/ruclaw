@@ -95,12 +95,16 @@ class LocalRuntimeManager(context: Context) {
             )
         }
 
-        stopLocalRuntime()
+        val reuseLauncher = !config.forceRestart && isLocalLauncherReady()
+        val reuseModelServer = ggufFile != null && !config.forceRestart && isModelServerReady()
+        if (config.forceRestart || !reuseLauncher || (ggufFile != null && !reuseModelServer)) {
+            stopLocalRuntime(config.dataDirectory)
+        }
         writeLauncherConfig(workspace.homeDir)
-        updateAppConfig(workspace.homeDir, ggufFile)
+        updateAppConfig(workspace.homeDir, ggufFile, config.telegram)
 
         val modelServer = if (ggufFile != null && modelServerBinary != null) {
-            if (isModelServerReady()) {
+            if (reuseModelServer) {
                 AppDiagnostics.log("Reusing existing local llama-server process")
                 null
             } else {
@@ -127,7 +131,7 @@ class LocalRuntimeManager(context: Context) {
             waitForModelServer(modelServer)
         }
 
-        if (isLocalLauncherReady()) {
+        if (reuseLauncher) {
             AppDiagnostics.log("Reusing existing local RuClaw launcher on $launcherUrl")
             launcherProcess = null
         } else {
@@ -156,10 +160,25 @@ class LocalRuntimeManager(context: Context) {
         )
     }
 
-    suspend fun stopLocalRuntime() = withContext(Dispatchers.IO) {
-        stopProcess("ruclaw-launcher", launcherProcess)
+    suspend fun stopLocalRuntime(dataDirectory: String = "") = withContext(Dispatchers.IO) {
+        val workspace = runCatching { resolveWorkspace(dataDirectory) }
+            .getOrElse { resolveWorkspace("") }
+        stopManagedProcess(
+            name = "ruclaw-launcher",
+            process = launcherProcess,
+            workspace = workspace,
+            markerFileName = launcherProcessMarkerFileName,
+            fallbackMarkerFileName = launcherPidFileName,
+            commandMarker = "ruclaw_launcher_exec",
+        )
         launcherProcess = null
-        stopProcess("llama-server", modelServerProcess)
+        stopManagedProcess(
+            name = "llama-server",
+            process = modelServerProcess,
+            workspace = workspace,
+            markerFileName = modelServerProcessMarkerFileName,
+            commandMarker = "llama_server_exec",
+        )
         modelServerProcess = null
     }
 
@@ -411,30 +430,23 @@ class LocalRuntimeManager(context: Context) {
     private fun updateAppConfig(
         homeDir: File,
         ggufFile: File?,
+        telegram: LocalTelegramConfig,
     ) {
         val file = File(homeDir, "config.json")
-        val createdFreshConfig = if (!file.exists()) {
+        if (!file.exists()) {
             file.parentFile?.mkdirs()
             file.writeText("{}\n")
-            true
-        } else {
-            false
-        }
-        if (ggufFile == null && createdFreshConfig) {
-            return
         }
 
-        val root = if (file.exists()) {
-            runCatching { json.decodeFromString<JsonObject>(file.readText()) }.getOrElse { JsonObject(emptyMap()) }
-        } else {
-            JsonObject(emptyMap())
-        }
+        val root = runCatching { json.decodeFromString<JsonObject>(file.readText()) }
+            .getOrElse { JsonObject(emptyMap()) }
         val existingModels = root["model_list"]?.jsonArray?.toList().orEmpty()
         val filteredModels = existingModels.filterNot { element ->
             element.jsonObject["model_name"]?.jsonPrimitive?.content == localModelName
         }
         val currentAgents = root["agents"]?.jsonObject ?: JsonObject(emptyMap())
         val currentDefaults = currentAgents["defaults"]?.jsonObject ?: JsonObject(emptyMap())
+        val currentChannels = root["channels"]?.jsonObject ?: JsonObject(emptyMap())
         val nextDefaultsBase = buildJsonObject {
             currentDefaults.forEach { (key, value) ->
                 put(key, value)
@@ -447,8 +459,9 @@ class LocalRuntimeManager(context: Context) {
                 put("max_tool_iterations", JsonPrimitive(localDefaultMaxToolIterations))
             }
         }
+        val nextChannels = buildChannelsConfig(currentChannels, telegram)
 
-        if (ggufFile == null) {
+        val nextRoot = if (ggufFile == null) {
             val nextDefaults = buildJsonObject {
                 nextDefaultsBase.forEach { (key, value) ->
                     if (!(key == "model_name" && value.jsonPrimitive.contentOrNull == localModelName)) {
@@ -456,73 +469,131 @@ class LocalRuntimeManager(context: Context) {
                     }
                 }
             }
-            val nextRoot = buildJsonObject {
+            buildJsonObject {
                 root.forEach { (key, value) ->
-                    if (key != "model_list" && key != "agents") {
+                    if (key != "model_list" && key != "agents" && key != "channels") {
                         put(key, value)
                     }
                 }
                 if (filteredModels.isNotEmpty() || root.containsKey("model_list")) {
                     put("model_list", JsonArray(filteredModels))
                 }
-                if (currentAgents.isNotEmpty() || root.containsKey("agents")) {
-                    put(
-                        "agents",
-                        buildJsonObject {
-                            currentAgents.forEach { (key, value) ->
-                                if (key != "defaults") {
-                                    put(key, value)
-                                }
-                            }
-                            if (nextDefaults.isNotEmpty() || currentAgents.containsKey("defaults")) {
-                                put("defaults", nextDefaults)
-                            }
-                        },
-                    )
-                }
-            }
-            file.parentFile?.mkdirs()
-            file.writeText(json.encodeToString(nextRoot) + "\n")
-            return
-        }
-
-        val modelId = sanitizeModelId(ggufFile.nameWithoutExtension.ifBlank { "local-gguf" })
-        val nextModels = filteredModels + buildJsonObject {
-            put("model_name", JsonPrimitive(localModelName))
-            put("model", JsonPrimitive("lmstudio/openai/$modelId"))
-            put("api_base", JsonPrimitive(localModelApiBase))
-        }
-
-        val nextRoot = buildJsonObject {
-            root.forEach { (key, value) ->
-                if (key != "model_list" && key != "agents") {
-                    put(key, value)
-                }
-            }
-            put("model_list", JsonArray(nextModels))
-            put(
-                "agents",
-                buildJsonObject {
-                    currentAgents.forEach { (key, value) ->
-                        if (key != "defaults") {
-                            put(key, value)
-                        }
-                    }
-                    put(
-                        "defaults",
-                        buildJsonObject {
-                            nextDefaultsBase.forEach { (key, value) ->
+                put(
+                    "agents",
+                    buildJsonObject {
+                        currentAgents.forEach { (key, value) ->
+                            if (key != "defaults") {
                                 put(key, value)
                             }
-                            put("model_name", JsonPrimitive(localModelName))
-                        },
-                    )
-                },
-            )
+                        }
+                        put("defaults", nextDefaults)
+                    },
+                )
+                if (nextChannels.isNotEmpty() || root.containsKey("channels")) {
+                    put("channels", nextChannels)
+                }
+            }
+        } else {
+            val modelId = sanitizeModelId(ggufFile.nameWithoutExtension.ifBlank { "local-gguf" })
+            val nextModels = filteredModels + buildJsonObject {
+                put("model_name", JsonPrimitive(localModelName))
+                put("model", JsonPrimitive("lmstudio/openai/$modelId"))
+                put("api_base", JsonPrimitive(localModelApiBase))
+            }
+
+            buildJsonObject {
+                root.forEach { (key, value) ->
+                    if (key != "model_list" && key != "agents" && key != "channels") {
+                        put(key, value)
+                    }
+                }
+                put("model_list", JsonArray(nextModels))
+                put(
+                    "agents",
+                    buildJsonObject {
+                        currentAgents.forEach { (key, value) ->
+                            if (key != "defaults") {
+                                put(key, value)
+                            }
+                        }
+                        put(
+                            "defaults",
+                            buildJsonObject {
+                                nextDefaultsBase.forEach { (key, value) ->
+                                    put(key, value)
+                                }
+                                put("model_name", JsonPrimitive(localModelName))
+                            },
+                        )
+                    },
+                )
+                if (nextChannels.isNotEmpty() || root.containsKey("channels")) {
+                    put("channels", nextChannels)
+                }
+            }
         }
 
         file.parentFile?.mkdirs()
         file.writeText(json.encodeToString(nextRoot) + "\n")
+    }
+
+    private fun buildChannelsConfig(
+        currentChannels: JsonObject,
+        telegram: LocalTelegramConfig,
+    ): JsonObject {
+        val token = telegram.botToken.trim()
+        if (telegram.enabled && token.isBlank()) {
+            throw IOException("Для Telegram сначала укажи токен бота.")
+        }
+        return buildJsonObject {
+            currentChannels.forEach { (key, value) ->
+                if (key != "telegram") {
+                    put(key, value)
+                }
+            }
+            if (telegram.enabled && token.isNotBlank()) {
+                put(
+                    "telegram",
+                    buildTelegramChannelConfig(
+                        current = currentChannels["telegram"]?.jsonObject ?: JsonObject(emptyMap()),
+                        token = token,
+                        telegram = telegram,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun buildTelegramChannelConfig(
+        current: JsonObject,
+        token: String,
+        telegram: LocalTelegramConfig,
+    ): JsonObject {
+        val allowedUsers = parseAllowFrom(telegram.allowedUsers)
+        if (allowedUsers.isEmpty()) {
+            throw IOException(
+                "Для Telegram укажи хотя бы один user/chat ID в Allow from или явно поставь * для открытого бота.",
+            )
+        }
+        return buildJsonObject {
+            current.forEach { (key, value) ->
+                if (key !in setOf("enabled", "token", "allow_from", "use_markdown_v2")) {
+                    put(key, value)
+                }
+            }
+            put("enabled", JsonPrimitive(true))
+            put("token", JsonPrimitive(token))
+            put("allow_from", JsonArray(allowedUsers.map(::JsonPrimitive)))
+            put("use_markdown_v2", JsonPrimitive(telegram.useMarkdownV2))
+        }
+    }
+
+    private fun parseAllowFrom(value: String): List<String> {
+        return value
+            .split(Regex("[,\\n\\r\\t ]+"))
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
     }
 
     private fun resolveGgufFile(
@@ -620,7 +691,7 @@ class LocalRuntimeManager(context: Context) {
                 throw process.buildStartupFailure(
                     name = "ruclaw-launcher",
                     exitCode = code,
-                    fallback = lastError?.message ?: "Локальный launcher завершился до готовности.",
+                    fallback = lastError?.message ?: "Локальный RuClaw завершился до готовности.",
                 )
             }
             delay(500)
@@ -628,7 +699,7 @@ class LocalRuntimeManager(context: Context) {
         throw process.buildStartupFailure(
             name = "ruclaw-launcher",
             exitCode = process.exitCodeOrNull(),
-            fallback = lastError?.message ?: "Локальный launcher не поднялся.",
+            fallback = lastError?.message ?: "Локальный RuClaw не поднялся.",
         )
     }
 
@@ -637,7 +708,7 @@ class LocalRuntimeManager(context: Context) {
     }
 
     private fun isLocalLauncherReady(): Boolean {
-        return probeAuthorizedReady("$launcherUrl/api/system/launcher-config", launcherToken)
+        return probeAuthorizedReady("$launcherUrl/api/pico/token", launcherToken)
     }
 
     private fun probeHttpReady(url: String): Boolean {
@@ -694,6 +765,7 @@ class LocalRuntimeManager(context: Context) {
 
         val recentOutput = RecentProcessOutput()
         watchProcessOutput(name, process, recentOutput)
+        persistProcessMarker(workspace, name, process.pid())
         AppDiagnostics.log("Spawned local runtime process: $name")
         return ManagedLocalProcess(process, recentOutput)
     }
@@ -709,6 +781,95 @@ class LocalRuntimeManager(context: Context) {
                 process.waitFor(2, TimeUnit.SECONDS)
             }
             AppDiagnostics.log("Local runtime process stopped: $name")
+        }
+    }
+
+    private fun stopManagedProcess(
+        name: String,
+        process: Process?,
+        workspace: LocalRuntimeWorkspace,
+        markerFileName: String,
+        fallbackMarkerFileName: String? = null,
+        commandMarker: String,
+    ) {
+        stopProcess(name, process)
+
+        val pidCandidates = buildList {
+            readPersistedPid(File(workspace.root, markerFileName))?.let(::add)
+            if (fallbackMarkerFileName != null) {
+                readPersistedPid(File(workspace.homeDir, fallbackMarkerFileName))?.let(::add)
+            }
+        }.distinct()
+
+        pidCandidates.forEach { pid ->
+            if (pidMatchesCommand(pid, commandMarker)) {
+                killPid(name, pid)
+            }
+        }
+
+        runCatching { File(workspace.root, markerFileName).delete() }
+    }
+
+    private fun persistProcessMarker(
+        workspace: LocalRuntimeWorkspace,
+        name: String,
+        pid: Long,
+    ) {
+        val markerFileName = when (name) {
+            "ruclaw-launcher" -> launcherProcessMarkerFileName
+            "llama-server" -> modelServerProcessMarkerFileName
+            else -> return
+        }
+        File(workspace.root, markerFileName).writeText(pid.toString() + "\n")
+    }
+
+    private fun readPersistedPid(file: File): Long? {
+        if (!file.exists()) {
+            return null
+        }
+        val raw = runCatching { file.readText() }.getOrNull()?.trim().orEmpty()
+        if (raw.isBlank()) {
+            return null
+        }
+        raw.toLongOrNull()?.let { return it }
+        return runCatching {
+            json.decodeFromString<JsonObject>(raw)["pid"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.toLongOrNull()
+        }.getOrNull()
+    }
+
+    private fun pidMatchesCommand(
+        pid: Long,
+        commandMarker: String,
+    ): Boolean {
+        if (pid <= 0) {
+            return false
+        }
+        val cmdline = runCatching {
+            File("/proc/$pid/cmdline")
+                .readBytes()
+                .decodeToString()
+                .replace('\u0000', ' ')
+                .trim()
+        }.getOrNull().orEmpty()
+        return cmdline.contains(commandMarker, ignoreCase = true)
+    }
+
+    private fun killPid(
+        name: String,
+        pid: Long,
+    ) {
+        if (pid <= 0) {
+            return
+        }
+        runCatching {
+            val kill = ProcessBuilder("/system/bin/kill", "-9", pid.toString())
+                .redirectErrorStream(true)
+                .start()
+            kill.waitFor(2, TimeUnit.SECONDS)
+            AppDiagnostics.log("Killed stale $name process via PID marker: $pid")
         }
     }
 
@@ -812,6 +973,9 @@ class LocalRuntimeManager(context: Context) {
         private const val localDefaultMaxToolIterations = 64
         private const val minimumLocalRuntimeSdk = 28
         private const val externalStorageDocumentsAuthority = "com.android.externalstorage.documents"
+        private const val launcherPidFileName = ".picoclaw.pid"
+        private const val launcherProcessMarkerFileName = ".ruclaw-launcher.pid"
+        private const val modelServerProcessMarkerFileName = ".llama-server.pid"
     }
 }
 
@@ -836,6 +1000,15 @@ data class LocalRuntimeInstallation(
 data class LocalRuntimeConfig(
     val ggufPath: String,
     val dataDirectory: String,
+    val forceRestart: Boolean = false,
+    val telegram: LocalTelegramConfig = LocalTelegramConfig(),
+)
+
+data class LocalTelegramConfig(
+    val enabled: Boolean = false,
+    val botToken: String = "",
+    val allowedUsers: String = "",
+    val useMarkdownV2: Boolean = false,
 )
 
 data class LocalRuntimeConnection(
