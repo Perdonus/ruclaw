@@ -435,10 +435,22 @@ class LocalRuntimeManager(context: Context) {
         }
         val currentAgents = root["agents"]?.jsonObject ?: JsonObject(emptyMap())
         val currentDefaults = currentAgents["defaults"]?.jsonObject ?: JsonObject(emptyMap())
+        val nextDefaultsBase = buildJsonObject {
+            currentDefaults.forEach { (key, value) ->
+                put(key, value)
+            }
+            val configuredMaxToolIterations = currentDefaults["max_tool_iterations"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?.toIntOrNull()
+            if (configuredMaxToolIterations == null || configuredMaxToolIterations < localDefaultMaxToolIterations) {
+                put("max_tool_iterations", JsonPrimitive(localDefaultMaxToolIterations))
+            }
+        }
 
         if (ggufFile == null) {
             val nextDefaults = buildJsonObject {
-                currentDefaults.forEach { (key, value) ->
+                nextDefaultsBase.forEach { (key, value) ->
                     if (!(key == "model_name" && value.jsonPrimitive.contentOrNull == localModelName)) {
                         put(key, value)
                     }
@@ -499,7 +511,7 @@ class LocalRuntimeManager(context: Context) {
                     put(
                         "defaults",
                         buildJsonObject {
-                            currentDefaults.forEach { (key, value) ->
+                            nextDefaultsBase.forEach { (key, value) ->
                                 put(key, value)
                             }
                             put("model_name", JsonPrimitive(localModelName))
@@ -797,6 +809,7 @@ class LocalRuntimeManager(context: Context) {
         private const val modelServerLibraryFileName = "libllama_server_exec.so"
         private const val localModelName = "local-gguf"
         private const val localModelApiBase = "http://127.0.0.1:1234/v1"
+        private const val localDefaultMaxToolIterations = 64
         private const val minimumLocalRuntimeSdk = 28
         private const val externalStorageDocumentsAuthority = "com.android.externalstorage.documents"
     }
