@@ -765,7 +765,9 @@ class LocalRuntimeManager(context: Context) {
 
         val recentOutput = RecentProcessOutput()
         watchProcessOutput(name, process, recentOutput)
-        persistProcessMarker(workspace, name, process.pid())
+        resolveProcessPid(process)?.let { pid ->
+            persistProcessMarker(workspace, name, pid)
+        }
         AppDiagnostics.log("Spawned local runtime process: $name")
         return ManagedLocalProcess(process, recentOutput)
     }
@@ -821,6 +823,31 @@ class LocalRuntimeManager(context: Context) {
             else -> return
         }
         File(workspace.root, markerFileName).writeText(pid.toString() + "\n")
+    }
+
+    private fun resolveProcessPid(process: Process): Long? {
+        return runCatching {
+            Process::class.java.getMethod("pid").invoke(process)
+        }.getOrNull()
+            ?.let { value ->
+                when (value) {
+                    is Long -> value
+                    is Int -> value.toLong()
+                    is Number -> value.toLong()
+                    else -> null
+                }
+            }
+            ?: runCatching {
+                val field = process.javaClass.getDeclaredField("pid").apply {
+                    isAccessible = true
+                }
+                when (val value = field.get(process)) {
+                    is Long -> value
+                    is Int -> value.toLong()
+                    is Number -> value.toLong()
+                    else -> null
+                }
+            }.getOrNull()
     }
 
     private fun readPersistedPid(file: File): Long? {
