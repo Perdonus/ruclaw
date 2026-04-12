@@ -1395,6 +1395,11 @@ private fun LocalRuntimeSection(
                             color = Color(0xFFB8C4D2),
                         )
                     }
+                    Text(
+                        text = "Бинарники уже внутри APK. Установка готовит папку данных и зеркала в bin/ для проверки.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFB8C4D2),
+                    )
                 }
             }
         }
@@ -1457,7 +1462,7 @@ private fun LocalRuntimeSection(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
-                    text = "Папка данных",
+                    text = "Папка данных и bin",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                 )
@@ -1476,6 +1481,11 @@ private fun LocalRuntimeSection(
                 ) {
                     Text("Выбрать папку")
                 }
+                Text(
+                    text = "Сюда RuClaw кладёт home/, logs/, models/, tmp/ и bin/. Реальный запуск идёт из встроенных APK native libs.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFB8C4D2),
+                )
             }
         }
 

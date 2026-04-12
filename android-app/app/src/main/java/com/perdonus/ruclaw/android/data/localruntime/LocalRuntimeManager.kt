@@ -54,11 +54,14 @@ class LocalRuntimeManager(context: Context) {
         ensureSupportedAndroidVersion()
         val workspace = prepareWorkspace(dataDirectory, log)
 
+        log("Сеть не нужна: локальный runtime уже встроен в APK.")
         log("Проверяю встроенные бинарники Android runtime…")
         val coreBinary = requireBundledBinary(coreBinaryLibraryFileName, log)
         val launcherBinary = requireBundledBinary(launcherBinaryLibraryFileName, log)
         val modelServerBinary = requireOptionalBundledBinary(modelServerLibraryFileName, log)
+        mirrorBundledBinaries(workspace, coreBinary, launcherBinary, modelServerBinary, log)
         writeBundledBuildInfo(workspace, log)
+        writeRuntimeInfo(workspace, coreBinary, launcherBinary, modelServerBinary, log)
 
         File(workspace.root, "VERSION.txt").writeText(BuildConfig.VERSION_NAME + "\n")
         log("Локальный runtime готов.")
@@ -215,6 +218,7 @@ class LocalRuntimeManager(context: Context) {
         val root = resolveWorkspaceRoot(dataDirectory).absoluteFile
         return LocalRuntimeWorkspace(
             root = root,
+            binDir = File(root, "bin"),
             homeDir = File(root, "home"),
             logsDir = File(root, "logs"),
             modelsDir = File(root, "models"),
@@ -224,6 +228,7 @@ class LocalRuntimeManager(context: Context) {
 
     private fun ensureWorkspaceDirectories(workspace: LocalRuntimeWorkspace) {
         workspace.root.mkdirs()
+        workspace.binDir.mkdirs()
         workspace.homeDir.mkdirs()
         workspace.logsDir.mkdirs()
         workspace.modelsDir.mkdirs()
@@ -412,6 +417,102 @@ class LocalRuntimeManager(context: Context) {
         } catch (_: FileNotFoundException) {
             // Older APKs may not bundle build info.
         }
+    }
+
+    private suspend fun mirrorBundledBinaries(
+        workspace: LocalRuntimeWorkspace,
+        coreBinary: File,
+        launcherBinary: File,
+        modelServerBinary: File?,
+        log: suspend (String) -> Unit,
+    ) {
+        mirrorBundledBinary(coreBinary, File(workspace.binDir, "ruclaw"), log)
+        mirrorBundledBinary(launcherBinary, File(workspace.binDir, "ruclaw-launcher"), log)
+        if (modelServerBinary != null) {
+            mirrorBundledBinary(modelServerBinary, File(workspace.binDir, "llama-server"), log)
+        }
+    }
+
+    private suspend fun mirrorBundledBinary(
+        source: File,
+        target: File,
+        log: suspend (String) -> Unit,
+    ) {
+        source.inputStream().use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+        target.setReadable(true, false)
+        target.setExecutable(true, false)
+        log("Копирую ${target.name} в ${target.parentFile?.absolutePath}…")
+    }
+
+    private suspend fun writeRuntimeInfo(
+        workspace: LocalRuntimeWorkspace,
+        coreBinary: File,
+        launcherBinary: File,
+        modelServerBinary: File?,
+        log: suspend (String) -> Unit,
+    ) {
+        val infoFile = File(workspace.root, runtimeInfoFileName)
+        infoFile.writeText(
+            json.encodeToString(
+                buildJsonObject {
+                    put("runtime_mode", JsonPrimitive("bundled_in_apk"))
+                    put("version", JsonPrimitive(BuildConfig.VERSION_NAME))
+                    put("workspace_root", JsonPrimitive(workspace.root.absolutePath))
+                    put("data_dirs", buildJsonObject {
+                        put("bin", JsonPrimitive(workspace.binDir.absolutePath))
+                        put("home", JsonPrimitive(workspace.homeDir.absolutePath))
+                        put("logs", JsonPrimitive(workspace.logsDir.absolutePath))
+                        put("models", JsonPrimitive(workspace.modelsDir.absolutePath))
+                        put("tmp", JsonPrimitive(workspace.tmpDir.absolutePath))
+                    })
+                    put("execution_binaries", buildJsonObject {
+                        put("ruclaw", JsonPrimitive(coreBinary.absolutePath))
+                        put("ruclaw_launcher", JsonPrimitive(launcherBinary.absolutePath))
+                        if (modelServerBinary != null) {
+                            put("llama_server", JsonPrimitive(modelServerBinary.absolutePath))
+                        }
+                    })
+                    put("mirrored_binaries", buildJsonObject {
+                        put("ruclaw", JsonPrimitive(File(workspace.binDir, "ruclaw").absolutePath))
+                        put("ruclaw_launcher", JsonPrimitive(File(workspace.binDir, "ruclaw-launcher").absolutePath))
+                        if (modelServerBinary != null) {
+                            put("llama_server", JsonPrimitive(File(workspace.binDir, "llama-server").absolutePath))
+                        }
+                    })
+                    put(
+                        "note",
+                        JsonPrimitive(
+                            "RuClaw runs from APK native libs. The selected folder stores data and mirrored binaries for visibility/debugging.",
+                        ),
+                    )
+                },
+            ) + "\n",
+        )
+
+        File(workspace.root, runtimeReadmeFileName).writeText(
+            """
+            |Локальный RuClaw уже встроен в APK приложения.
+            |
+            |Что лежит в этой папке:
+            |- bin/ — видимые копии бинарников для проверки и отладки.
+            |- home/ — config, база, сессии и данные launcher-а.
+            |- logs/ — логи локального runtime.
+            |- models/ — локальные GGUF-модели.
+            |- tmp/ — временные файлы.
+            |
+            |Что реально запускает приложение:
+            |- ${coreBinary.absolutePath}
+            |- ${launcherBinary.absolutePath}
+            |${modelServerBinary?.absolutePath?.let { "- $it" } ?: "- llama-server в этом APK не встроен"}
+            |
+            |Почему так:
+            |Android надёжнее запускает встроенные native libs из APK, чем бинарники из обычной папки данных.
+            |Поэтому в bin/ лежат зеркала для наглядности, а реальный запуск идёт из APK.
+            """.trimMargin() + "\n",
+        )
+        log("Сохраняю ${runtimeInfoFileName} и ${runtimeReadmeFileName}…")
     }
 
     private fun writeLauncherConfig(homeDir: File) {
@@ -992,6 +1093,8 @@ class LocalRuntimeManager(context: Context) {
 
         private const val assetDir = "runtime"
         private const val buildInfoAssetName = "BUILD_INFO.txt"
+        private const val runtimeInfoFileName = "RUNTIME_INFO.json"
+        private const val runtimeReadmeFileName = "README.txt"
         private const val coreBinaryLibraryFileName = "libruclaw_exec.so"
         private const val launcherBinaryLibraryFileName = "libruclaw_launcher_exec.so"
         private const val modelServerLibraryFileName = "libllama_server_exec.so"
@@ -1008,6 +1111,7 @@ class LocalRuntimeManager(context: Context) {
 
 private data class LocalRuntimeWorkspace(
     val root: File,
+    val binDir: File,
     val homeDir: File,
     val logsDir: File,
     val modelsDir: File,

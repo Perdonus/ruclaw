@@ -382,7 +382,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         ),
                     )
                 }
-                showMessage("Локальный runtime установлен.")
+                showMessage("Локальный runtime готов. В выбранной папке теперь есть данные и bin/, а запуск идёт из APK.")
             }.onFailure { error ->
                 val message = error.message ?: "Не удалось установить локальный runtime."
                 _uiState.update { state ->
