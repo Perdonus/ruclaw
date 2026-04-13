@@ -1368,9 +1368,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val handshake = localHandshake ?: launcherClient.ensurePico(config.url, config.token)
             cachedHandshake = handshake
 
-            val remoteThreads = launcherClient.listSessions(config.url, config.token)
-            localStateRepository.replaceThreads(remoteThreads)
-
             var persisted = localStateRepository.snapshot()
             var sessionId = persisted.activeSessionId
             if (sessionId == null) {
@@ -1379,16 +1376,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 persisted = localStateRepository.snapshot()
             }
 
-            val activeCached = loadRemoteHistory(config.url, config.token, sessionId)
-                ?: persisted.cachedSessions.firstOrNull { it.sessionId == sessionId }
+            val cachedSession = persisted.cachedSessions.firstOrNull { it.sessionId == sessionId }
                 ?: emptyCachedSession(sessionId)
-            persistSession(sessionId, activeCached.messages, activeCached.title, activeCached.preview)
-            applyStoreSnapshot(messagesOverride = activeCached.messages)
+            applyStoreSnapshot(messagesOverride = cachedSession.messages)
 
             openSocket(config.url, config.token, handshake, sessionId)
             reconnectAttempts = 0
             updateConnectionState(ConnectionStatus.CONNECTED, "Локальный RuClaw активен")
-            refreshLauncherCatalog(force = true, silent = true)
+            refreshConnectedLauncherState(
+                url = config.url,
+                token = config.token,
+                sessionId = sessionId,
+                cachedSession = cachedSession,
+            )
         } catch (error: Throwable) {
             shouldMaintainConnection =
                 _uiState.value.launcherMode == LauncherMode.LOCAL &&
@@ -1525,6 +1525,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             PicoEvent.Pong -> Unit
+        }
+    }
+
+    private fun refreshConnectedLauncherState(
+        url: String,
+        token: String,
+        sessionId: String,
+        cachedSession: CachedSession,
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                val remoteThreads = launcherClient.listSessions(url, token)
+                localStateRepository.replaceThreads(remoteThreads)
+                applyStoreSnapshot()
+
+                val canRefreshHistory =
+                    _uiState.value.activeSessionId == sessionId &&
+                        _uiState.value.messages == cachedSession.messages &&
+                        !_uiState.value.composer.isSending
+
+                if (canRefreshHistory) {
+                    val remoteSession = loadRemoteHistory(url, token, sessionId)
+                    if (
+                        remoteSession != null &&
+                        _uiState.value.activeSessionId == sessionId &&
+                        _uiState.value.messages == cachedSession.messages &&
+                        !_uiState.value.composer.isSending
+                    ) {
+                        persistSession(
+                            sessionId = sessionId,
+                            messages = remoteSession.messages,
+                            titleOverride = remoteSession.title,
+                            previewOverride = remoteSession.preview,
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) {
+                    throw error
+                }
+                AppDiagnostics.log("Startup launcher refresh failed: ${error.message ?: "unknown"}")
+                updateDiagnostics()
+            }
+            refreshLauncherCatalog(force = true, silent = true)
         }
     }
 
