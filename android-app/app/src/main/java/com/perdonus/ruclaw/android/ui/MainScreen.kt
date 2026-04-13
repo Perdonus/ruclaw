@@ -66,6 +66,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AssistChip
@@ -160,19 +163,6 @@ fun MainScreen(viewModel: MainViewModel) {
                 )
             }
             viewModel.onLocalModelPathChanged(uri.toString())
-        }
-    }
-    val dataDirectoryPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                )
-            }
-            viewModel.onLocalDataDirectoryChanged(uri.toString())
         }
     }
 
@@ -287,9 +277,21 @@ fun MainScreen(viewModel: MainViewModel) {
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                 )
             },
+            onToggleRuntime = viewModel::toggleRuntimePower,
+            onRestartRuntime = viewModel::restartLocalRuntime,
             onOpenAgentSheet = { viewModel.toggleAgentSheet(true) },
             modifier = Modifier.fillMaxSize(),
         )
+
+        if (
+            state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING &&
+            !state.localRuntime.isInstalled
+        ) {
+            RuntimePreparationOverlay(
+                logs = state.localRuntime.installLogs,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         SnackbarHost(
             hostState = snackbarHostState,
@@ -304,7 +306,6 @@ fun MainScreen(viewModel: MainViewModel) {
         SettingsSheet(
             state = state,
             viewModel = viewModel,
-            onPickDataDirectory = { dataDirectoryPicker.launch(null) },
         )
     }
 
@@ -341,12 +342,101 @@ private fun LoadingShell() {
 }
 
 @Composable
+private fun RuntimePreparationOverlay(
+    logs: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "runtime-prep")
+    val panelAlpha by transition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "runtime-prep-alpha",
+    )
+
+    Box(
+        modifier = modifier
+            .background(Color(0xF1111823))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(34.dp),
+            color = Color(0xF0182230).copy(alpha = panelAlpha),
+            shadowElevation = 28.dp,
+            border = BorderStroke(1.dp, Color(0x24FFFFFF)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 560.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 22.dp, vertical = 22.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFF243244)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.4.dp,
+                            color = Color(0xFF72D8C4),
+                        )
+                    }
+                    Text(
+                        text = "Готовим ресурсы",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White,
+                    )
+                }
+
+                AnimatedVisibility(visible = logs.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = Color(0xCC0C1118),
+                        border = BorderStroke(1.dp, Color(0x18FFFFFF)),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            logs.takeLast(5).forEach { line ->
+                                Text(
+                                    text = line,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFD7DEE7),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ConnectedSurface(
     state: MainUiState,
     viewModel: MainViewModel,
     onPathClick: (String) -> Unit,
     onCopyMessage: (String) -> Unit,
     onAddPhoto: () -> Unit,
+    onToggleRuntime: () -> Unit,
+    onRestartRuntime: () -> Unit,
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -375,6 +465,8 @@ private fun ConnectedSurface(
                     onPathClick = onPathClick,
                     onCopyMessage = onCopyMessage,
                     onAddPhoto = onAddPhoto,
+                    onToggleRuntime = onToggleRuntime,
+                    onRestartRuntime = onRestartRuntime,
                     onOpenDrawer = null,
                     onOpenAgentSheet = onOpenAgentSheet,
                     modifier = Modifier
@@ -415,6 +507,8 @@ private fun ConnectedSurface(
                     onPathClick = onPathClick,
                     onCopyMessage = onCopyMessage,
                     onAddPhoto = onAddPhoto,
+                    onToggleRuntime = onToggleRuntime,
+                    onRestartRuntime = onRestartRuntime,
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenAgentSheet = onOpenAgentSheet,
                     modifier = Modifier.fillMaxSize(),
@@ -426,10 +520,30 @@ private fun ConnectedSurface(
 
 @Composable
 private fun TopOverlayBar(
+    connectionStatus: ConnectionStatus,
+    installState: LocalRuntimeInstallState,
+    onToggleRuntime: () -> Unit,
+    onRestartRuntime: () -> Unit,
     onOpenDrawer: (() -> Unit)?,
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val runtimeBusy = installState == LocalRuntimeInstallState.INSTALLING ||
+        connectionStatus in setOf(
+            ConnectionStatus.CONNECTING,
+            ConnectionStatus.RECONNECTING,
+        )
+    val runtimeOnline = connectionStatus == ConnectionStatus.CONNECTED
+    val powerContainerColor = when {
+        runtimeBusy -> Color(0xFF5B6675)
+        runtimeOnline -> Color(0xFFFF707A)
+        else -> Color(0xFF58D77E)
+    }
+    val powerContentColor = when {
+        runtimeOnline || runtimeBusy -> Color.White
+        else -> Color(0xFF07110B)
+    }
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(30.dp),
@@ -448,6 +562,8 @@ private fun TopOverlayBar(
             if (onOpenDrawer != null) {
                 FilledIconButton(
                     onClick = onOpenDrawer,
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(18.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = Color(0xCC1E2A38),
                         contentColor = Color.White,
@@ -459,8 +575,58 @@ private fun TopOverlayBar(
 
             Spacer(modifier = Modifier.weight(1f))
 
+            if (runtimeOnline) {
+                FilledIconButton(
+                    onClick = onRestartRuntime,
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color(0xFFE0B54C),
+                        contentColor = Color(0xFF181101),
+                    ),
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Перезапустить локальный runtime")
+                }
+            }
+
+            FilledIconButton(
+                onClick = onToggleRuntime,
+                enabled = !runtimeBusy,
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = powerContainerColor,
+                    contentColor = powerContentColor,
+                    disabledContainerColor = powerContainerColor,
+                    disabledContentColor = powerContentColor,
+                ),
+            ) {
+                if (runtimeBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = powerContentColor,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (runtimeOnline) {
+                            Icons.Rounded.PowerSettingsNew
+                        } else {
+                            Icons.Rounded.PlayArrow
+                        },
+                        contentDescription = if (runtimeOnline) {
+                            "Остановить локальный runtime"
+                        } else {
+                            "Запустить локальный runtime"
+                        },
+                    )
+                }
+            }
+
             FilledIconButton(
                 onClick = onOpenAgentSheet,
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = Color(0xFF72D8C4),
                     contentColor = Color(0xFF091B18),
@@ -598,6 +764,8 @@ private fun ChatStage(
     onPathClick: (String) -> Unit,
     onCopyMessage: (String) -> Unit,
     onAddPhoto: () -> Unit,
+    onToggleRuntime: () -> Unit,
+    onRestartRuntime: () -> Unit,
     onOpenDrawer: (() -> Unit)?,
     onOpenAgentSheet: () -> Unit,
     modifier: Modifier = Modifier,
@@ -690,6 +858,10 @@ private fun ChatStage(
         )
 
         TopOverlayBar(
+            connectionStatus = state.connectionState.status,
+            installState = state.localRuntime.installState,
+            onToggleRuntime = onToggleRuntime,
+            onRestartRuntime = onRestartRuntime,
             onOpenDrawer = onOpenDrawer,
             onOpenAgentSheet = onOpenAgentSheet,
             modifier = Modifier
@@ -1125,9 +1297,9 @@ private fun EmptyStage(
     modifier: Modifier = Modifier,
 ) {
     val prompts = listOf(
-        "Сделай Android-интерфейс под локальный RuClaw",
-        "Покажи где ломается API и как исправить",
-        "Подготовь новый релиз APK",
+        "Проверь локальный поиск и web-инструменты",
+        "Добавь GGUF-модель в локальный каталог",
+        "Настрой Telegram-бота прямо на телефоне",
     )
 
     Column(
@@ -1137,20 +1309,32 @@ private fun EmptyStage(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Готов к задаче",
+            text = when {
+                state.connectionState.status == ConnectionStatus.CONNECTED -> "RuClaw запущен"
+                state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> "Поднимаю RuClaw"
+                else -> "Локальный RuClaw"
+            },
             style = MaterialTheme.typography.headlineSmall,
             color = Color.White,
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(16.dp))
         AssistChip(
-            onClick = { viewModel.toggleSettings(true) },
+            onClick = {
+                when {
+                    state.connectionState.status == ConnectionStatus.CONNECTED -> viewModel.toggleSettings(true)
+                    state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> Unit
+                    else -> viewModel.toggleRuntimePower()
+                }
+            },
             label = {
                 Text(
                     text = when {
-                        state.connectionState.status == ConnectionStatus.CONNECTED -> "Локальный RuClaw активен"
-                        state.localRuntime.isInstalled -> "Локальный runtime установлен"
-                        else -> "Нажми на настройки и установи local runtime"
+                        state.connectionState.status == ConnectionStatus.CONNECTED -> "Локальный runtime онлайн"
+                        state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> "Готовим локальный runtime"
+                        state.localRuntime.installState == LocalRuntimeInstallState.FAILED -> "Подготовка сорвалась, нажми чтобы повторить"
+                        state.localRuntime.isInstalled -> "Нажми зелёную кнопку сверху"
+                        else -> "Ресурсы подготовятся автоматически"
                     },
                 )
             },
@@ -1191,7 +1375,6 @@ private fun EmptyStage(
 private fun SettingsSheet(
     state: MainUiState,
     viewModel: MainViewModel,
-    onPickDataDirectory: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
@@ -1208,7 +1391,7 @@ private fun SettingsSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Локальный RuClaw",
+                text = "Настройки",
                 style = MaterialTheme.typography.titleLarge,
                 color = Color.White,
             )
@@ -1217,33 +1400,12 @@ private fun SettingsSheet(
                 localRuntime = state.localRuntime,
                 connectionStatus = state.connectionState.status,
                 hasNotificationPermission = state.hasNotificationPermission,
-                onInstall = viewModel::installLocalRuntime,
-                onDataDirectoryChanged = viewModel::onLocalDataDirectoryChanged,
-                onPickDataDirectory = onPickDataDirectory,
                 onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
                 onRequestNotificationPermission = viewModel::requestNotificationsPermission,
                 onTelegramEnabledChanged = viewModel::onTelegramEnabledChanged,
                 onTelegramBotTokenChanged = viewModel::onTelegramBotTokenChanged,
                 onTelegramAllowedUsersChanged = viewModel::onTelegramAllowedUsersChanged,
                 onTelegramMarkdownV2Changed = viewModel::onTelegramMarkdownV2Changed,
-                onLaunch = {
-                    viewModel.toggleSettings(false)
-                    viewModel.connectLauncher(forceRestart = true)
-                },
-            )
-
-            HorizontalDivider(color = Color(0x1FFFFFFF))
-
-            UpdateSection(
-                updateState = state.updateState,
-                onCheckUpdates = { viewModel.checkForUpdates() },
-                onDownloadUpdate = viewModel::downloadUpdate,
-                onInstallUpdate = viewModel::installDownloadedUpdate,
-                onOpenRelease = {
-                    state.updateState.releaseUrl
-                        .takeIf { it.isNotBlank() }
-                        ?.let(viewModel::openExternalUrl)
-                },
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -1256,236 +1418,109 @@ private fun LocalRuntimeSection(
     localRuntime: LocalRuntimeUiState,
     connectionStatus: ConnectionStatus,
     hasNotificationPermission: Boolean,
-    onInstall: () -> Unit,
-    onDataDirectoryChanged: (String) -> Unit,
-    onPickDataDirectory: () -> Unit,
     onKeepAliveChanged: (Boolean) -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onTelegramEnabledChanged: (Boolean) -> Unit,
     onTelegramBotTokenChanged: (String) -> Unit,
     onTelegramAllowedUsersChanged: (String) -> Unit,
     onTelegramMarkdownV2Changed: (Boolean) -> Unit,
-    onLaunch: () -> Unit,
 ) {
     val installBusy = localRuntime.installState == LocalRuntimeInstallState.INSTALLING
-    val launcherBusy = connectionStatus in setOf(
-        ConnectionStatus.CONNECTING,
-        ConnectionStatus.CONNECTED,
-        ConnectionStatus.RECONNECTING,
-    )
     val launcherConnecting = connectionStatus in setOf(
         ConnectionStatus.CONNECTING,
         ConnectionStatus.RECONNECTING,
     )
     val launcherLive = connectionStatus == ConnectionStatus.CONNECTED
+    val statusText = when {
+        installBusy -> "Подготовка"
+        launcherLive -> "Онлайн"
+        launcherConnecting -> "Запуск"
+        localRuntime.isInstalled -> "Оффлайн"
+        else -> "Первый запуск"
+    }
+    val statusColor = when {
+        launcherLive -> Color(0xFFFF7680)
+        installBusy || launcherConnecting -> Color(0xFFB6C1CF)
+        else -> Color(0xFF72D8C4)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = Color.Transparent,
-            border = BorderStroke(1.dp, Color(0x1FFFFFFF)),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Box(
-                modifier = Modifier
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(Color(0xFF192535), Color(0xFF0E141D)),
-                            start = Offset.Zero,
-                            end = Offset(920f, 1320f),
-                        ),
-                    )
-                    .padding(18.dp),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Установка и запуск",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = Color.White,
-                        )
-                        AssistChip(
-                            onClick = {},
-                            label = {
-                                Text(
-                                    when (connectionStatus) {
-                                        ConnectionStatus.CONNECTED -> "Онлайн"
-                                        ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "Подъём"
-                                        else -> if (localRuntime.isInstalled) "Оффлайн" else "Не установлен"
-                                    },
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.Link,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(if (localRuntime.isInstalled) "Установлено" else "Не установлено") },
-                        )
-                        AssistChip(
-                            onClick = {},
-                            label = { Text(if (localRuntime.keepAliveEnabled) "Фон: вкл" else "Фон: выкл") },
-                        )
-                        if (localRuntime.telegramEnabled) {
-                            AssistChip(
-                                onClick = {},
-                                label = { Text("Телеграм: вкл") },
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        FilledTonalButton(
-                            onClick = onInstall,
-                            enabled = !installBusy && !launcherBusy,
-                            shape = RoundedCornerShape(20.dp),
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            if (installBusy) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp,
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Установка…")
-                            } else {
-                                Text(if (localRuntime.isInstalled) "Переустановить runtime" else "Установить runtime")
-                            }
-                        }
-                        FilledTonalButton(
-                            onClick = onLaunch,
-                            enabled = !installBusy && localRuntime.isInstalled && !launcherConnecting,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Color(0xFF72D8C4),
-                                contentColor = Color(0xFF081017),
-                                disabledContainerColor = Color(0x553B4C5F),
-                                disabledContentColor = Color(0x99C9D0D7),
-                            ),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Send,
-                                contentDescription = "Запустить локально",
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (launcherLive) "Перезапустить" else "Запустить")
-                        }
-                    }
-
-                    if (localRuntime.runtimeVersion.isNotBlank()) {
-                        Text(
-                            text = "Версия " + localRuntime.runtimeVersion,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color(0xFFB8C4D2),
-                        )
-                    }
-                    Text(
-                        text = "Бинарники уже внутри APK. Установка готовит папку данных и зеркала в bin/ для проверки.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFB8C4D2),
-                    )
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = installBusy ||
-                localRuntime.installState == LocalRuntimeInstallState.FAILED ||
-                localRuntime.installLogs.isNotEmpty(),
-        ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = Color(0xFF0C1118),
-                border = BorderStroke(1.dp, Color(0x18FFFFFF)),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (installBusy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
-                                color = Color(0xFF72D8C4),
-                            )
-                        }
-                        Text(
-                            text = if (localRuntime.installState == LocalRuntimeInstallState.FAILED) {
-                                "Ошибка установки"
-                            } else {
-                                "Логи установки"
-                            },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Color.White,
-                        )
-                    }
-                    localRuntime.installLogs.takeLast(8).forEach { line ->
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFD3DAE3),
-                        )
-                    }
-                }
-            }
-        }
-
-        Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(26.dp),
             color = Color(0xCC182231),
             border = BorderStroke(1.dp, Color(0x18FFFFFF)),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = "Папка данных и bin",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White,
-                )
-                OutlinedTextField(
-                    value = localRuntime.dataDirectory,
-                    onValueChange = onDataDirectoryChanged,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Путь") },
-                    placeholder = { Text("Пусто = встроенная папка приложения") },
-                    singleLine = true,
-                    colors = sheetFieldColors(),
-                )
-                TextButton(
-                    onClick = onPickDataDirectory,
-                    modifier = Modifier.align(Alignment.End),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Выбрать папку")
+                    Text(
+                        text = "Локальный runtime",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = statusColor.copy(alpha = 0.18f),
+                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.34f)),
+                    ) {
+                        Text(
+                            text = statusText,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = statusColor,
+                        )
+                    }
                 }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(if (localRuntime.launcherEnabled) "Автостарт: да" else "Автостарт: нет") },
+                    )
+                    AssistChip(
+                        onClick = {},
+                        label = { Text(if (localRuntime.keepAliveEnabled) "Keep-alive" else "Без keep-alive") },
+                    )
+                }
+
+                if (localRuntime.telegramEnabled) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("Telegram") },
+                    )
+                }
+
+                if (localRuntime.runtimeVersion.isNotBlank()) {
+                    Text(
+                        text = "Версия " + localRuntime.runtimeVersion,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFFB8C4D2),
+                    )
+                }
+
                 Text(
-                    text = "Сюда RuClaw кладёт home/, logs/, models/, tmp/ и bin/. Реальный запуск идёт из встроенных APK native libs.",
+                    text = "Если runtime был включён перед закрытием прилы, при следующем запуске он поднимется сам.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB8C4D2),
+                    color = Color(0xFFD7E0EA),
                 )
+
+                if (
+                    localRuntime.installState == LocalRuntimeInstallState.FAILED &&
+                    localRuntime.installLogs.isNotEmpty()
+                ) {
+                    Text(
+                        text = localRuntime.installLogs.last(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFB4B9),
+                    )
+                }
             }
         }
 
@@ -1505,7 +1540,7 @@ private fun LocalRuntimeSection(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Фоновое удержание",
+                        text = "Keep-alive",
                         style = MaterialTheme.typography.titleMedium,
                         color = Color.White,
                     )

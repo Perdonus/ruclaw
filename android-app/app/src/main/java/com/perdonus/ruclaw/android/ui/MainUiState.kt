@@ -38,6 +38,7 @@ data class MainUiState(
 
 data class LocalRuntimeUiState(
     val isInstalled: Boolean = false,
+    val launcherEnabled: Boolean = false,
     val runtimeVersion: String = "",
     val runtimeRoot: String = "",
     val launcherUrl: String = DEFAULT_LOCAL_LAUNCHER_URL,

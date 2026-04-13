@@ -72,6 +72,7 @@ data class LauncherConfigDraft(
 @Serializable
 data class PersistedLocalRuntimeState(
     val isInstalled: Boolean = false,
+    val launcherEnabled: Boolean = false,
     val runtimeVersion: String = "",
     val runtimeRoot: String = "",
     val launcherUrl: String = "",

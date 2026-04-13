@@ -190,16 +190,7 @@ class LocalRuntimeManager(context: Context) {
     }
 
     fun requiresAllFilesAccess(dataDirectory: String): Boolean {
-        val selector = dataDirectory.trim()
-        if (selector.isBlank()) {
-            return false
-        }
-        val root = try {
-            resolveWorkspaceRoot(selector).absoluteFile
-        } catch (_: Throwable) {
-            return false
-        }
-        return requiresAllFilesAccess(root)
+        return false
     }
 
     private suspend fun prepareWorkspace(
@@ -238,16 +229,14 @@ class LocalRuntimeManager(context: Context) {
     private fun verifyWorkspaceWritable(root: File) {
         if (requiresAllFilesAccess(root) && !hasAllFilesAccess()) {
             throw IOException(
-                "Папка данных лежит в общем Android-хранилище: ${root.absolutePath}. " +
-                    "Для Download, Documents и других общих папок локальному RuClaw нужен системный доступ " +
-                    "«Все файлы». Выдай его для RuClaw в настройках Android или очисти поле папки данных.",
+                "Android не дал локальному runtime доступ к рабочей папке: " + root.absolutePath,
             )
         }
         if (!root.exists() && !root.mkdirs()) {
-            throw IOException("Не удалось создать папку данных: ${root.absolutePath}")
+            throw IOException("Не удалось создать рабочую папку local runtime: ${root.absolutePath}")
         }
         if (!root.isDirectory) {
-            throw IOException("Папка данных не похожа на каталог: ${root.absolutePath}")
+            throw IOException("Рабочая папка local runtime не похожа на каталог: ${root.absolutePath}")
         }
 
         val probe = File(root, ".ruclaw-write-test")
@@ -256,22 +245,14 @@ class LocalRuntimeManager(context: Context) {
             probe.delete()
         }.getOrElse { error ->
             throw IOException(
-                "Выбранная папка недоступна для прямой записи: ${root.absolutePath}. " +
-                    "Выбери обычную папку во внутреннем накопителе устройства или оставь встроенную.",
+                "Локальная рабочая папка недоступна для записи: " + root.absolutePath,
                 error,
             )
         }
     }
 
     private fun resolveWorkspaceRoot(dataDirectory: String): File {
-        val selector = dataDirectory.trim()
-        if (selector.isBlank()) {
-            return defaultRuntimeRoot
-        }
-        if (selector.startsWith("content://", ignoreCase = true)) {
-            return resolveTreeUriToFile(Uri.parse(selector))
-        }
-        return File(selector)
+        return defaultRuntimeRoot
     }
 
     private fun resolveTreeUriToFile(uri: Uri): File {

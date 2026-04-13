@@ -8,11 +8,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import com.perdonus.ruclaw.android.core.util.AppDiagnostics
@@ -32,8 +34,17 @@ class SessionKeepAliveService : Service() {
         val title = intent?.getStringExtra(extraTitle).orEmpty().ifBlank { "RuClaw активен" }
         val message = intent?.getStringExtra(extraMessage).orEmpty()
             .ifBlank { "Держу локальный runtime и чат активными" }
-        startForeground(notificationId, buildNotification(title, message))
-        AppDiagnostics.log("KeepAlive service updated: $message")
+        ServiceCompat.startForeground(
+            this,
+            notificationId,
+            buildNotification(title, message),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            },
+        )
+        AppDiagnostics.log("KeepAlive service active: $message")
         return START_STICKY
     }
 
@@ -61,6 +72,7 @@ class SessionKeepAliveService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
@@ -110,24 +122,21 @@ class SessionKeepAliveService : Service() {
         private const val extraMessage = "message"
 
         fun sync(context: Context, active: Boolean, title: String, message: String) {
-            val intent = Intent(context, SessionKeepAliveService::class.java).apply {
+            val appContext = context.applicationContext
+            val intent = Intent(appContext, SessionKeepAliveService::class.java).apply {
                 putExtra(extraTitle, title)
                 putExtra(extraMessage, message)
             }
             if (active) {
-                if (!hasNotificationPermission(context)) {
-                    AppDiagnostics.log("KeepAlive service skipped: notification permission is missing")
-                    return
-                }
                 runCatching {
-                    ContextCompat.startForegroundService(context, intent)
+                    ContextCompat.startForegroundService(appContext, intent)
                 }.onFailure { error ->
                     AppDiagnostics.log(
                         "KeepAlive service start failed: ${error::class.java.simpleName}: ${error.message ?: "unknown"}",
                     )
                 }
             } else {
-                context.stopService(intent)
+                appContext.stopService(intent)
             }
         }
 
