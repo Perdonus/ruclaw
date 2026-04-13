@@ -118,7 +118,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -554,7 +553,6 @@ private fun TopOverlayBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -813,8 +811,6 @@ private fun ChatStage(
             }
         } else {
             EmptyStage(
-                state = state,
-                viewModel = viewModel,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = topPadding, bottom = bottomPadding),
@@ -866,6 +862,7 @@ private fun ChatStage(
             onOpenAgentSheet = onOpenAgentSheet,
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .statusBarsPadding()
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 12.dp),
         )
@@ -1292,83 +1289,9 @@ private fun ComposerAttachmentPreview(
 
 @Composable
 private fun EmptyStage(
-    state: MainUiState,
-    viewModel: MainViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val prompts = listOf(
-        "Проверь локальный поиск и web-инструменты",
-        "Добавь GGUF-модель в локальный каталог",
-        "Настрой Telegram-бота прямо на телефоне",
-    )
-
-    Column(
-        modifier = modifier
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(
-            text = when {
-                state.connectionState.status == ConnectionStatus.CONNECTED -> "RuClaw запущен"
-                state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> "Поднимаю RuClaw"
-                else -> "Локальный RuClaw"
-            },
-            style = MaterialTheme.typography.headlineSmall,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        AssistChip(
-            onClick = {
-                when {
-                    state.connectionState.status == ConnectionStatus.CONNECTED -> viewModel.toggleSettings(true)
-                    state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> Unit
-                    else -> viewModel.toggleRuntimePower()
-                }
-            },
-            label = {
-                Text(
-                    text = when {
-                        state.connectionState.status == ConnectionStatus.CONNECTED -> "Локальный runtime онлайн"
-                        state.localRuntime.installState == LocalRuntimeInstallState.INSTALLING -> "Готовим локальный runtime"
-                        state.localRuntime.installState == LocalRuntimeInstallState.FAILED -> "Подготовка сорвалась, нажми чтобы повторить"
-                        state.localRuntime.isInstalled -> "Нажми зелёную кнопку сверху"
-                        else -> "Ресурсы подготовятся автоматически"
-                    },
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Rounded.Link,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-            },
-        )
-        Spacer(modifier = Modifier.height(22.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            prompts.forEach { prompt ->
-                AssistChip(
-                    onClick = { viewModel.applySuggestion(prompt) },
-                    label = {
-                        Text(
-                            text = prompt,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.Link,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    },
-                )
-            }
-        }
-    }
+    Box(modifier = modifier)
 }
 
 @Composable
@@ -1398,7 +1321,6 @@ private fun SettingsSheet(
 
             LocalRuntimeSection(
                 localRuntime = state.localRuntime,
-                connectionStatus = state.connectionState.status,
                 hasNotificationPermission = state.hasNotificationPermission,
                 onKeepAliveChanged = viewModel::onLocalKeepAliveChanged,
                 onRequestNotificationPermission = viewModel::requestNotificationsPermission,
@@ -1416,7 +1338,6 @@ private fun SettingsSheet(
 @Composable
 private fun LocalRuntimeSection(
     localRuntime: LocalRuntimeUiState,
-    connectionStatus: ConnectionStatus,
     hasNotificationPermission: Boolean,
     onKeepAliveChanged: (Boolean) -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -1425,105 +1346,7 @@ private fun LocalRuntimeSection(
     onTelegramAllowedUsersChanged: (String) -> Unit,
     onTelegramMarkdownV2Changed: (Boolean) -> Unit,
 ) {
-    val installBusy = localRuntime.installState == LocalRuntimeInstallState.INSTALLING
-    val launcherConnecting = connectionStatus in setOf(
-        ConnectionStatus.CONNECTING,
-        ConnectionStatus.RECONNECTING,
-    )
-    val launcherLive = connectionStatus == ConnectionStatus.CONNECTED
-    val statusText = when {
-        installBusy -> "Подготовка"
-        launcherLive -> "Онлайн"
-        launcherConnecting -> "Запуск"
-        localRuntime.isInstalled -> "Оффлайн"
-        else -> "Первый запуск"
-    }
-    val statusColor = when {
-        launcherLive -> Color(0xFFFF7680)
-        installBusy || launcherConnecting -> Color(0xFFB6C1CF)
-        else -> Color(0xFF72D8C4)
-    }
-
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = Color(0xCC182231),
-            border = BorderStroke(1.dp, Color(0x18FFFFFF)),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Локальный runtime",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White,
-                    )
-                    Surface(
-                        shape = CircleShape,
-                        color = statusColor.copy(alpha = 0.18f),
-                        border = BorderStroke(1.dp, statusColor.copy(alpha = 0.34f)),
-                    ) {
-                        Text(
-                            text = statusText,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = statusColor,
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(if (localRuntime.launcherEnabled) "Автостарт: да" else "Автостарт: нет") },
-                    )
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(if (localRuntime.keepAliveEnabled) "Keep-alive" else "Без keep-alive") },
-                    )
-                }
-
-                if (localRuntime.telegramEnabled) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("Telegram") },
-                    )
-                }
-
-                if (localRuntime.runtimeVersion.isNotBlank()) {
-                    Text(
-                        text = "Версия " + localRuntime.runtimeVersion,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFB8C4D2),
-                    )
-                }
-
-                Text(
-                    text = "Если runtime был включён перед закрытием прилы, при следующем запуске он поднимется сам.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFD7E0EA),
-                )
-
-                if (
-                    localRuntime.installState == LocalRuntimeInstallState.FAILED &&
-                    localRuntime.installLogs.isNotEmpty()
-                ) {
-                    Text(
-                        text = localRuntime.installLogs.last(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFFFB4B9),
-                    )
-                }
-            }
-        }
-
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = Color(0xCC182231),
