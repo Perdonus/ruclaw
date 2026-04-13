@@ -1970,7 +1970,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun shouldKeepAlive(status: ConnectionStatus): Boolean {
         val connected = status in setOf(
-            ConnectionStatus.CONNECTING,
             ConnectionStatus.CONNECTED,
             ConnectionStatus.RECONNECTING,
         )

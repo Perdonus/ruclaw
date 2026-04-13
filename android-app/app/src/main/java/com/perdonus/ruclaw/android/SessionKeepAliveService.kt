@@ -26,6 +26,7 @@ class SessionKeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
         ensureNotificationChannel()
+        startForegroundNow(defaultTitle, defaultMessage)
         acquireLocks()
         AppDiagnostics.log("KeepAlive service started")
     }
@@ -34,16 +35,7 @@ class SessionKeepAliveService : Service() {
         val title = intent?.getStringExtra(extraTitle).orEmpty().ifBlank { "RuClaw активен" }
         val message = intent?.getStringExtra(extraMessage).orEmpty()
             .ifBlank { "Держу локальный runtime и чат активными" }
-        ServiceCompat.startForeground(
-            this,
-            notificationId,
-            buildNotification(title, message),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            } else {
-                0
-            },
-        )
+        startForegroundNow(title, message)
         AppDiagnostics.log("KeepAlive service active: $message")
         return START_STICKY
     }
@@ -56,19 +48,38 @@ class SessionKeepAliveService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun startForegroundNow(
+        title: String,
+        message: String,
+    ) {
+        ServiceCompat.startForeground(
+            this,
+            notificationId,
+            buildNotification(title, message),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            },
+        )
+    }
+
     private fun buildNotification(title: String, message: String) =
-        NotificationCompat.Builder(this, channelId)
+        NotificationCompat.Builder(this, channelId).apply {
+            packageManager.getLaunchIntentForPackage(packageName)?.let { launchIntent ->
+                setContentIntent(
+                    PendingIntent.getActivity(
+                        this@SessionKeepAliveService,
+                        0,
+                        launchIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                    ),
+                )
+            }
+        }
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(message)
-            .setContentIntent(
-                PendingIntent.getActivity(
-                    this,
-                    0,
-                    packageManager.getLaunchIntentForPackage(packageName),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                ),
-            )
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -120,6 +131,8 @@ class SessionKeepAliveService : Service() {
         private const val notificationId = 42021
         private const val extraTitle = "title"
         private const val extraMessage = "message"
+        private const val defaultTitle = "RuClaw Android"
+        private const val defaultMessage = "Держу локальный runtime активным"
 
         fun sync(context: Context, active: Boolean, title: String, message: String) {
             val appContext = context.applicationContext
